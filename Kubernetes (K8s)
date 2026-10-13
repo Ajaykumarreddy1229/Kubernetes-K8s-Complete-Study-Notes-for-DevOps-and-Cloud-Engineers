@@ -1,0 +1,369 @@
+# Kubernetes (K8s) — Complete Study Notes for DevOps and Cloud Engineers
+
+## 1. What Is Kubernetes?
+
+Kubernetes (K8s) is an open-source container orchestration platform used to automate the deployment, scaling, networking, and management of containerized applications.
+
+In simple words, Kubernetes helps us manage containers running on multiple servers.
+
+### Why Do We Need Kubernetes?
+
+Imagine an application running inside a container. When traffic increases, a single container or server may not be sufficient.
+
+Kubernetes helps us:
+- Scale applications when traffic increases.
+- Replace failed application Pods.
+- Distribute traffic across application replicas.
+- Deploy new application versions.
+- Roll back to previous versions.
+- Manage containers across multiple nodes.
+
+## 2. Docker vs. Kubernetes
+
+**Docker and container tools:** Help build container images and run containers.
+
+**Kubernetes:** Manages and orchestrates containerized applications across a cluster.
+
+Kubernetes works with Pods, which contain one or more containers.
+
+## 3. Docker Swarm vs. Kubernetes
+
+| Feature | Docker Swarm | Kubernetes |
+|---|---|---|
+| Setup | Generally simple | More concepts to configure |
+| Learning curve | Low | Higher |
+| Scaling | Supports service scaling | Extensive scaling options |
+| Networking | Comparatively simple | Flexible and configurable |
+| Self-healing | Supports task rescheduling | Controllers maintain desired state |
+| Ecosystem | Smaller | Large cloud-native ecosystem |
+| Cloud support | Available | Broad managed cloud support |
+| Best suited for | Simpler deployments | A wide range of workloads, including complex production systems |
+
+## 4. Kubernetes Architecture
+
+A Kubernetes cluster consists of two major parts:
+
+1. Control Plane
+2. Worker Nodes
+
+### Control Plane
+
+The Control Plane manages the Kubernetes cluster, makes scheduling decisions, and maintains the desired state of applications.
+
+### Worker Nodes
+
+Worker Nodes run the application workloads inside Pods.
+
+### Basic Architecture
+
+```text
+              Developer / Administrator
+                         |
+                       kubectl
+                         |
+                  Kubernetes API
+                      Server
+                         |
+          +--------------+--------------+
+          |              |              |
+         etcd       Scheduler      Controllers
+                         |
+                  Worker Nodes
+                 /             \
+          Worker Node 1     Worker Node 2
+          +-----------+     +-----------+
+          | kubelet   |     | kubelet   |
+          | Runtime   |     | Runtime   |
+          | Pods      |     | Pods      |
+          +-----------+     +-----------+
+```
+
+## 5. Control Plane Components
+
+### 5.1 API Server — kube-apiserver
+
+- Entry point for Kubernetes API requests.
+- Receives and validates requests from kubectl and other clients.
+- Provides communication between Kubernetes components through the API.
+
+**In simple words:** The API Server is the main communication point of Kubernetes.
+
+### 5.2 Scheduler — kube-scheduler
+
+- Selects a suitable Worker Node for a newly created Pod.
+- Considers available CPU, memory, scheduling rules, and constraints.
+
+**In simple words:** The Scheduler decides where a Pod should run.
+
+### 5.3 Controller Manager — kube-controller-manager
+
+- Runs controllers that monitor cluster resources.
+- Compares the actual state with the desired state.
+- Takes action to bring the cluster toward the desired state.
+
+**Example:** A Deployment requests three replicas. Controllers work to maintain the requested number of replicas.
+
+### 5.4 etcd
+
+- A consistent key-value data store.
+- Stores Kubernetes cluster information, configuration, and state.
+- Is critical to the operation of the Control Plane.
+
+**In simple words:** etcd is the database used by Kubernetes.
+
+### 5.5 Cloud Controller Manager
+
+- Integrates Kubernetes with supported cloud-provider APIs.
+- Can help manage resources such as cloud load balancers and routes.
+
+This component is used when required by the cluster's infrastructure and configuration.
+
+## 6. Worker Node Components
+
+### 6.1 Kubelet
+
+- An agent that runs on each Worker Node.
+- Communicates with the API Server.
+- Works with the container runtime to ensure assigned Pod containers are running.
+
+### 6.2 Container Runtime
+
+- Responsible for running containers.
+- Pulls images and starts containers.
+- Examples include containerd and CRI-O.
+
+### 6.3 Kube-Proxy
+
+- Commonly manages network rules used for Kubernetes Service traffic.
+- Helps route traffic to the appropriate application endpoints.
+
+Some cluster networking solutions replace kube-proxy functionality.
+
+### 6.4 Pods
+
+- Pods are the smallest deployable units in Kubernetes.
+- A Pod contains one or more containers.
+- Containers in a Pod share the same network identity and can share storage.
+- Pods can be replaced when workloads need to recover or scale.
+
+**Remember:** A Pod is not the same as a container.
+
+## 7. Important Kubernetes Objects
+
+### Pod
+Runs one or more application containers.
+
+### Deployment
+Manages stateless application replicas and supports rolling updates.
+
+### ReplicaSet
+Helps maintain the requested number of Pod replicas. It is usually managed by a Deployment.
+
+### Service
+Provides a stable network endpoint for accessing application Pods.
+
+### ConfigMap
+Stores non-sensitive application configuration.
+
+### Secret
+Stores sensitive configuration data. Appropriate access controls and encryption should be configured.
+
+### PersistentVolume (PV)
+Represents storage available to the cluster.
+
+### PersistentVolumeClaim (PVC)
+Requests storage for an application.
+
+### Namespace
+Logically separates namespaced resources within a cluster.
+
+## 8. Kubernetes Networking
+
+Kubernetes Services allow applications to communicate without relying on individual Pod IP addresses remaining unchanged.
+
+### 8.1 ClusterIP
+
+- Default Service type.
+- Provides internal access within the cluster.
+
+### 8.2 NodePort
+
+- Exposes a Service through a port on each node.
+- External access depends on network connectivity and firewall rules.
+
+### 8.3 LoadBalancer
+
+- Requests an external load balancer when supported by the infrastructure or cloud provider.
+- Commonly used to expose applications externally.
+
+## 9. Kubernetes Volumes, PV, and PVC
+
+Containers and Pods can be replaced during normal operations. Persistent storage helps retain important application data.
+
+### Volume
+Provides storage mounted into a Pod.
+
+### PersistentVolume (PV)
+Represents a storage resource available to the cluster.
+
+### PersistentVolumeClaim (PVC)
+Allows an application to request persistent storage.
+
+### StorageClass
+Defines a class of storage and can support automatic storage provisioning.
+
+### AWS Example
+
+Amazon EBS can provide persistent block storage for Kubernetes workloads through a suitable Container Storage Interface (CSI) driver.
+
+## 10. Kubernetes Namespaces
+
+Namespaces help organize and separate resources within a cluster.
+
+For example, an organization can create namespaces for:
+
+- Development
+- Testing
+- Production
+
+Namespaces provide naming scope and resource organization. Additional security controls, such as RBAC and network policies, may be required.
+
+## 11. Kubernetes Cluster Types
+
+There are two broad approaches to creating Kubernetes clusters.
+
+### 11.1 Self-Managed or Learning Clusters
+
+**Minikube**
+- Commonly used for learning Kubernetes.
+- Can run a local Kubernetes cluster.
+
+**kubeadm**
+- Helps bootstrap Kubernetes clusters.
+- Operators manage much of the cluster lifecycle.
+
+**Kops**
+- Helps provision and manage clusters on supported infrastructure, including AWS.
+
+### 11.2 Managed Kubernetes Services
+
+**Amazon EKS:** Amazon Elastic Kubernetes Service.
+
+**Azure AKS:** Azure Kubernetes Service.
+
+**Google GKE:** Google Kubernetes Engine.
+
+Managed Kubernetes services reduce some control-plane management work, but application deployment, security, networking, and cost management still require attention.
+
+## 12. Important Kubernetes Features
+
+### Container Orchestration
+Manages containerized applications across a cluster.
+
+### Scaling
+Allows application replicas to increase or decrease.
+
+### Self-Healing
+Controllers can replace failed Pods to maintain the desired state.
+
+### Load Distribution
+Services distribute traffic across eligible application endpoints.
+
+### Rolling Updates
+Supports updating application versions gradually.
+
+### Rollbacks
+Supports returning a Deployment to a previous revision.
+
+### Service Discovery
+Allows applications to find and communicate with Services.
+
+## 13. Essential kubectl Commands
+
+`kubectl` is the command-line tool used to communicate with a Kubernetes API Server.
+
+### Cluster Commands
+
+```bash
+kubectl cluster-info
+kubectl get nodes
+kubectl get namespaces
+```
+
+### Pod Commands
+
+```bash
+kubectl get pods
+kubectl get pods -A
+kubectl describe pod <pod-name>
+kubectl logs <pod-name>
+```
+
+### Deployment Commands
+
+```bash
+kubectl get deployments
+kubectl describe deployment <deployment-name>
+kubectl scale deployment <deployment-name> --replicas=3
+```
+
+### Service Commands
+
+```bash
+kubectl get services
+kubectl describe service <service-name>
+```
+
+### Apply Kubernetes Configuration
+
+```bash
+kubectl apply -f <file.yaml>
+```
+
+### Check Current Context
+
+```bash
+kubectl config current-context
+```
+
+Replace placeholders with your actual resource names and filenames.
+
+## 14. Kubernetes History
+
+Kubernetes originated from Google's experience with large-scale cluster management systems, particularly Borg and Omega.
+
+- **2014:** Google announced Kubernetes as an open-source project.
+- **2015:** Kubernetes was donated to the Cloud Native Computing Foundation (CNCF).
+
+Kubernetes developed into a widely used platform for cloud-native application management.
+
+## 15. Interview Revision — Important Points
+
+1. Kubernetes is a container orchestration platform.
+2. K8s is the short form of Kubernetes.
+3. A cluster contains a Control Plane and Worker Nodes.
+4. Pods are the smallest deployable units in Kubernetes.
+5. A Pod can contain one or more containers.
+6. The API Server handles Kubernetes API requests.
+7. The Scheduler selects suitable nodes for Pods.
+8. Controllers work to maintain the desired state.
+9. etcd stores Kubernetes cluster data.
+10. Kubelet manages assigned Pod workloads on a node.
+11. Container runtimes run containers.
+12. Services provide stable network access to Pods.
+13. PV and PVC are important for persistent storage.
+14. Namespaces help organize resources.
+15. EKS, AKS, and GKE are managed Kubernetes services.
+16. kubectl is the Kubernetes command-line tool.
+17. Deployments manage application replicas and updates.
+18. Kubernetes supports scaling, recovery, and rollbacks.
+
+## Conclusion
+
+Kubernetes is an important technology for DevOps and cloud engineering. Understanding its architecture, components, Pods, Deployments, Services, networking, storage, and kubectl commands provides a strong foundation for hands-on practice and technical interviews.
+
+My next learning goal is to deploy applications, expose them through Services, scale workloads, and troubleshoot Kubernetes resources.
+
+---
+
+**Topics:** Kubernetes, K8s, DevOps, AWS EKS, Docker, Container Orchestration, Cloud Computing, kubectl.
