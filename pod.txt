@@ -1,0 +1,26 @@
+Creates one Pod running an NGINX container.
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-pod
+  labels:
+    app: nginx
+spec:
+  containers:
+    - name: nginx-container
+      image: nginx:stable
+      ports:
+        - containerPort: 80
+Run the commands:
+kubectl apply -f pod.yml
+kubectl get pods
+kubectl describe pod nginx-pod
+kubectl delete -f pod.yml
+Explanation:
+- apiVersion: v1 — API version for a Pod.
+- kind: Pod — resource type.
+- metadata — Pod name and labels.
+- spec — container configuration.
+- image — container image to run.
+- containerPort — port the container expects to use.

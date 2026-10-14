@@ -1,0 +1,23 @@
+A PersistentVolumeClaim requests storage for an application. Whether it binds successfully depends on the cluster's available storage classes and provisioner.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+
+
+Apply and check:
+kubectl apply -f pvc.yml
+kubectl get pvc
+kubectl describe pvc app-pvc
+kubectl get storageclass
+
+
+On Minikube, the default storage configuration commonly provisions a volume dynamically. If the claim remains Pending, inspect the storage classes and PVC events.

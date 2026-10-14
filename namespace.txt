@@ -1,0 +1,22 @@
+Namespaces help organize resources inside a Kubernetes cluster.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: banking
+
+
+
+Run:
+kubectl apply -f namespace.yml
+kubectl get namespaces
+
+
+Create a Pod inside this namespace by adding namespace: banking under metadata in its manifest, or use:
+kubectl run nginx-pod \
+  --image=nginx:stable \
+  --namespace=banking
+
+
+Check:
+kubectl get pods -n banking

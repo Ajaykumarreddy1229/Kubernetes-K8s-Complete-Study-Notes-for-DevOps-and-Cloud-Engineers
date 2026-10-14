@@ -1,0 +1,43 @@
+Deployments are generally preferred for managing application releases because they support rolling updates and rollbacks.
+
+apiVersion appsv1
+kind Deployment
+metadata
+  name nginx-deployment
+spec
+  replicas 3
+  selector
+    matchLabels
+      app nginx-deploy
+  template
+    metadata
+      labels
+        app nginx-deploy
+    spec
+      containers
+        - name nginx-container
+          image nginxstable
+          ports
+            - containerPort 80
+
+
+
+Run
+kubectl apply -f deployment.yml
+kubectl get deployments
+kubectl get rs
+kubectl get pods
+kubectl rollout status deploymentnginx-deployment
+
+
+Update the image
+kubectl set image deploymentnginx-deployment nginx-container=nginxlatest
+
+
+Check the rollout
+kubectl rollout status deploymentnginx-deployment
+kubectl rollout history deploymentnginx-deployment
+
+
+Rollback if required
+kubectl rollout undo deploymentnginx-deployment

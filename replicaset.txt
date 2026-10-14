@@ -1,0 +1,32 @@
+Creates and maintains three NGINX Pods.
+
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: nginx-rs
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx-container
+          image: nginx:stable
+          ports:
+            - containerPort: 80
+
+
+
+Run:
+kubectl apply -f replicaset.yml
+kubectl get rs
+kubectl get pods --show-labels
+kubectl scale rs/nginx-rs --replicas=5
+
+
+Important: selector.matchLabels must match the labels in template.metadata.labels. If one managed Pod is deleted, the ReplicaSet tries to create another.
