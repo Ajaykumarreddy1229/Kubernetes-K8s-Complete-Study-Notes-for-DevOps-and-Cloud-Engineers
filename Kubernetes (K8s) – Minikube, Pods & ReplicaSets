@@ -1,0 +1,769 @@
+# Kubernetes (K8s) – Minikube, Pods & ReplicaSets
+
+Beginner-friendly Kubernetes study notes and hands-on practice for DevOps and Cloud Engineers.
+
+## Table of Contents
+
+1. Minikube Setup on Ubuntu 24.04
+2. kubectl Basics
+3. Kubernetes Pods
+4. Imperative Pod Creation
+5. Declarative Pod Creation
+6. YAML Manifest Structure
+7. kubecolor Installation
+8. ReplicaSets
+9. Labels and Selectors
+10. Scaling ReplicaSets
+11. ReplicaSet Limitations
+12. ReplicationController vs ReplicaSet vs Deployment
+13. Useful Commands
+14. Hands-on Practice Tasks
+
+---
+
+## 1. Minikube Setup on Ubuntu 24.04
+
+### Requirements
+
+- OS: Ubuntu Server 24.04 LTS
+- Instance type: AWS EC2 `t3.medium`
+- Storage: Minimum 20 GB
+- Login username: `ubuntu`
+- Install Docker, Minikube, and kubectl.
+
+**Important:** Use Ubuntu 24.04 as specified. Do not use Ubuntu 26 for this lab.
+
+### Step 1: Update the system
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y curl wget ca-certificates
+```
+
+### Step 2: Install Docker
+
+```bash
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+sudo systemctl enable --now docker
+sudo docker version
+```
+
+To run Docker without `sudo` in this personal lab:
+
+```bash
+sudo usermod -aG docker ubuntu
+```
+
+Log out and log in again for the group change to take effect. Docker group membership provides root-level privileges, so use it only on a trusted machine.
+
+### Step 3: Install Minikube
+
+```bash
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+sudo install minikube-linux-amd64 /usr/local/bin/minikube
+minikube version
+```
+
+### Step 4: Install kubectl
+
+```bash
+KUBECTL_VERSION="$(curl -L -s https://dl.k8s.io/release/stable.txt)"
+
+curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+
+curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
+
+echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+
+sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+kubectl version --client
+```
+
+### Step 5: Start Minikube
+
+Run Minikube as the normal `ubuntu` user.
+
+```bash
+minikube start --driver=docker
+```
+
+Verify the installation:
+
+```bash
+minikube status
+kubectl get nodes
+kubectl get pods -A
+```
+
+**Explanation:**
+
+- `minikube start`: Starts a local Kubernetes cluster.
+- `minikube status`: Displays the Minikube component status.
+- `kubectl get nodes`: Lists Kubernetes nodes.
+- `kubectl get pods -A`: Lists Pods across all namespaces.
+
+---
+
+## 2. What Is kubectl?
+
+`kubectl` is the command-line tool used to communicate with a Kubernetes cluster.
+
+We use kubectl to create, manage, inspect, update, and delete Kubernetes resources.
+
+Examples include:
+
+- Pods
+- Services
+- Deployments
+- ReplicaSets
+- Namespaces
+- ConfigMaps
+- Secrets
+
+The default kubectl configuration is stored in:
+
+```text
+~/.kube/config
+```
+
+Useful commands:
+
+```bash
+kubectl cluster-info
+kubectl get nodes
+kubectl get pods
+kubectl get pods -A
+kubectl api-versions
+kubectl api-resources
+```
+
+- `kubectl api-versions`: Lists API versions available in the cluster.
+- `kubectl api-resources`: Lists Kubernetes resource types.
+
+---
+
+## 3. What Is a Pod?
+
+A **Pod is the smallest deployable unit in Kubernetes**.
+
+A Pod contains one or more containers that are scheduled together on the same node.
+
+### Important points
+
+- Most Pods contain a single application container.
+- A Pod can contain multiple containers when required.
+- Containers inside the same Pod share the Pod's network namespace.
+- Containers in the same Pod can communicate using `localhost`.
+- Containers can share storage when the same volumes are mounted into them.
+- Pods are ephemeral, meaning they can be deleted and replaced.
+- A replacement Pod can have a different name and IP address.
+
+Kubernetes controllers manage Pods, while Services provide stable network access to matching Pods.
+
+### Two ways to create Pods
+
+1. **Imperative approach:** Create resources directly using commands.
+2. **Declarative approach:** Define resources in YAML manifests and apply them.
+
+Declarative manifests are commonly preferred in real-world projects because they can be reused, reviewed, and maintained in GitHub.
+
+---
+
+## 4. Create a Pod Using Commands
+
+This is called the imperative approach.
+
+### Create a Pod
+
+```bash
+kubectl run pod1 --image=nginx
+```
+
+This creates a Pod named `pod1` using the NGINX image.
+
+### Check Pods
+
+```bash
+kubectl get pods
+kubectl get po
+kubectl get pods -o wide
+```
+
+### Describe a Pod
+
+```bash
+kubectl describe pod pod1
+```
+
+This displays information about the Pod, its container, events, and status.
+
+### View logs
+
+```bash
+kubectl logs pod1
+```
+
+### Connect to the container
+
+```bash
+kubectl exec -it pod1 -- /bin/sh
+```
+
+Inside the container:
+
+```bash
+cd /usr/share/nginx/html
+cat index.html
+exit
+```
+
+### Delete the Pod
+
+```bash
+kubectl delete pod pod1
+```
+
+**Limitation:** If a standalone Pod is deleted, Kubernetes does not automatically recreate that standalone Pod. Controllers such as ReplicaSets and Deployments provide this functionality.
+
+---
+
+## 5. Create a Pod Using a YAML Manifest
+
+This is called the declarative approach.
+
+Create a file:
+
+```bash
+vi pod.yml
+```
+
+Add the following content:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod1
+  labels:
+    app: nginx
+spec:
+  containers:
+    - name: cont1
+      image: nginx:stable
+      ports:
+        - containerPort: 80
+```
+
+Save the file and create the Pod:
+
+```bash
+kubectl apply -f pod.yml
+```
+
+Verify:
+
+```bash
+kubectl get pods
+kubectl describe pod pod1
+kubectl get pods --show-labels
+```
+
+Delete the Pod:
+
+```bash
+kubectl delete -f pod.yml
+```
+
+### Why use YAML?
+
+- Easy to understand and maintain.
+- Can be reused to recreate resources.
+- Can be stored in GitHub.
+- Supports consistent deployments.
+- Helps teams review configuration changes.
+
+---
+
+## 6. YAML Manifest Structure
+
+Most Kubernetes manifests use four important fields.
+
+```yaml
+apiVersion:
+kind:
+metadata:
+spec:
+```
+
+### apiVersion
+
+Specifies the Kubernetes API group and version used by the resource.
+
+| Resource | API version |
+|---|---|
+| Pod | `v1` |
+| Service | `v1` |
+| Namespace | `v1` |
+| Secret | `v1` |
+| ReplicaSet | `apps/v1` |
+| Deployment | `apps/v1` |
+| Job | `batch/v1` |
+
+### kind
+
+Specifies the Kubernetes resource to create.
+
+Examples:
+
+```yaml
+kind: Pod
+```
+
+```yaml
+kind: Deployment
+```
+
+```yaml
+kind: Service
+```
+
+Other examples include ReplicaSet, Namespace, Ingress, and Job.
+
+### metadata
+
+Contains information about the Kubernetes object.
+
+Example:
+
+```yaml
+metadata:
+  name: pod1
+  labels:
+    app: nginx
+```
+
+- `name`: Name of the resource.
+- `labels`: Key-value pairs used to organize and select resources.
+
+### spec
+
+Defines the desired state of the resource.
+
+For a Pod, this can include:
+
+- Container image
+- Container name
+- Ports
+- Environment variables
+- Volumes
+- Resource requests and limits
+
+For a Deployment, it also includes the desired replica count and Pod template.
+
+---
+
+## 7. kubecolor Installation (Optional)
+
+`kubecolor` displays colored kubectl output, making it easier to read.
+
+Example installation using a Linux x86-64 release archive:
+
+```bash
+wget https://github.com/hidetatz/kubecolor/releases/download/v0.0.25/kubecolor_0.0.25_Linux_x86_64.tar.gz
+
+tar -xzf kubecolor_0.0.25_Linux_x86_64.tar.gz
+
+chmod +x kubecolor
+
+sudo install kubecolor /usr/local/bin/kubecolor
+```
+
+Run:
+
+```bash
+kubecolor get pods
+kubecolor get nodes
+```
+
+Check the official release page for newer versions.
+
+---
+
+## 8. ReplicaSets
+
+A **ReplicaSet ensures that a specified number of matching Pod replicas are running**.
+
+For example, if a ReplicaSet specifies three replicas and one Pod is deleted, the ReplicaSet attempts to create a replacement.
+
+### Advantages
+
+- Self-healing: Replaces missing Pods to maintain the desired count.
+- Scaling: Allows the number of replicas to be increased or decreased.
+- Label selection: Manages Pods matching its selector.
+
+A ReplicaSet helps maintain Pod replicas, but it does not by itself provide stable network access or guarantee high availability across infrastructure failures. Services and appropriate cluster design are also important.
+
+### Create a ReplicaSet
+
+Create a file:
+
+```bash
+vi replicaset.yml
+```
+
+Add:
+
+```yaml
+apiVersion: apps/v1
+kind: ReplicaSet
+metadata:
+  name: ib-rs
+  labels:
+    app: internetbanking
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: internetbanking
+  template:
+    metadata:
+      labels:
+        app: internetbanking
+    spec:
+      containers:
+        - name: cont1
+          image: nginx:stable
+          ports:
+            - containerPort: 80
+```
+
+This example uses NGINX as a test application. You can replace the image with your own Internet Banking application image when available.
+
+### Create the ReplicaSet
+
+```bash
+kubectl apply -f replicaset.yml
+```
+
+### Verify the ReplicaSet
+
+```bash
+kubectl get replicasets
+kubectl get rs
+kubectl get rs -o wide
+kubectl describe rs ib-rs
+kubectl get pods
+kubectl get pods --show-labels
+```
+
+### Watch Pods live
+
+Open another terminal:
+
+```bash
+kubectl get pods --watch
+```
+
+Delete one of the managed Pods, replacing the placeholder with an actual Pod name:
+
+```bash
+kubectl delete pod <pod-name>
+```
+
+Check the Pods again:
+
+```bash
+kubectl get pods --show-labels
+```
+
+The ReplicaSet should create a replacement Pod.
+
+---
+
+## 9. Labels and Selectors
+
+### Labels
+
+Labels are key-value pairs attached to Kubernetes resources.
+
+Example:
+
+```yaml
+labels:
+  app: internetbanking
+```
+
+Labels help group and identify resources.
+
+### Selectors
+
+Selectors identify resources with matching labels.
+
+Example:
+
+```yaml
+selector:
+  matchLabels:
+    app: internetbanking
+```
+
+The ReplicaSet selector must match the labels in its Pod template.
+
+### List Pods with labels
+
+```bash
+kubectl get pods --show-labels
+```
+
+### Get Pods using a label
+
+```bash
+kubectl get pods -l app=internetbanking
+```
+
+### Delete Pods using a label
+
+```bash
+kubectl delete pods -l app=internetbanking
+```
+
+Be careful: if these Pods are managed by a ReplicaSet, it will try to recreate them. Delete or scale down the controller when you intend to stop maintaining those replicas.
+
+### Practice with four banking applications
+
+Create separate manifests for:
+
+1. Internet Banking — `app: internetbanking`
+2. Mobile Banking — `app: mobilebanking`
+3. Insurance — `app: insurance`
+4. Loans — `app: loans`
+
+Ensure the selector and Pod template labels match in every manifest.
+
+---
+
+## 10. Scale ReplicaSets
+
+Scaling changes the desired number of replicas.
+
+### Scale out
+
+Increase the number of replicas to ten:
+
+```bash
+kubectl scale rs/ib-rs --replicas=10
+```
+
+Watch the Pods:
+
+```bash
+kubectl get pods --watch
+```
+
+### Scale in
+
+Reduce the number of replicas to five:
+
+```bash
+kubectl scale rs/ib-rs --replicas=5
+```
+
+Check:
+
+```bash
+kubectl get pods
+kubectl get rs
+```
+
+Scaling can be performed manually. Kubernetes also supports autoscaling when the required components and workload configuration are in place.
+
+**Note:** Kubernetes does not guarantee a simple Last In, First Out (LIFO) order when deleting Pods during scale-in.
+
+To keep the desired replica count in your YAML configuration, edit `spec.replicas` in `replicaset.yml` and run:
+
+```bash
+kubectl apply -f replicaset.yml
+```
+
+---
+
+## 11. ReplicaSet Limitations
+
+ReplicaSets maintain the desired number of Pods, but they are not designed to manage application rollouts.
+
+For example, changing the container image in the ReplicaSet template does not automatically replace all existing Pods with the new version as a Deployment rollout would.
+
+Existing Pods can continue running the old image while newly created Pods use the updated template.
+
+### Solution: Use Deployments
+
+Deployments are recommended for most application workloads because they manage ReplicaSets and provide:
+
+- Rolling updates
+- Rollout status
+- Revision history
+- Rollbacks
+- Declarative application updates
+
+Example:
+
+```bash
+kubectl create deployment nginx-demo --image=nginx:stable
+```
+
+Check:
+
+```bash
+kubectl get deployments
+kubectl rollout status deployment/nginx-demo
+```
+
+Update the image:
+
+```bash
+kubectl set image deployment/nginx-demo nginx=nginx:latest
+```
+
+View rollout history:
+
+```bash
+kubectl rollout history deployment/nginx-demo
+```
+
+Roll back to the previous revision:
+
+```bash
+kubectl rollout undo deployment/nginx-demo
+```
+
+The container name used in `kubectl set image` must match the container name in the Deployment's Pod template.
+
+---
+
+## 12. ReplicationController vs ReplicaSet vs Deployment
+
+### ReplicationController
+
+- Older Kubernetes controller for maintaining Pod replicas.
+- Uses equality-based label selectors.
+- Superseded for most new workloads by ReplicaSets and Deployments.
+
+### ReplicaSet
+
+- Maintains a specified number of matching Pods.
+- Supports label selectors, including `matchLabels`.
+- Does not provide the full rollout management workflow of Deployments.
+
+### Deployment
+
+- Recommended for most stateless application workloads.
+- Manages ReplicaSets and Pod updates.
+- Supports rolling updates, rollout history, and rollbacks.
+
+### Relationship
+
+```text
+Deployment
+    |
+    v
+ReplicaSet
+    |
+    v
+Pods
+    |
+    v
+Containers
+```
+
+---
+
+## 13. Useful Commands Cheat Sheet
+
+| Command | Purpose |
+|---|---|
+| `minikube start --driver=docker` | Start Minikube |
+| `minikube status` | Check Minikube status |
+| `kubectl get nodes` | List Kubernetes nodes |
+| `kubectl get pods` | List Pods |
+| `kubectl get pods -A` | List Pods in all namespaces |
+| `kubectl get pods -o wide` | Display additional Pod details |
+| `kubectl describe pod pod1` | Inspect a Pod |
+| `kubectl logs pod1` | View Pod container logs |
+| `kubectl exec -it pod1 -- /bin/sh` | Open a container shell |
+| `kubectl get events` | View namespace events |
+| `kubectl api-versions` | List API versions |
+| `kubectl api-resources` | List resource types |
+| `kubectl get rs` | List ReplicaSets |
+| `kubectl describe rs ib-rs` | Inspect a ReplicaSet |
+| `kubectl get pods --show-labels` | Display Pod labels |
+| `kubectl get pods -l app=internetbanking` | Select Pods by label |
+| `kubectl scale rs/ib-rs --replicas=5` | Scale a ReplicaSet |
+| `kubectl apply -f pod.yml` | Apply a manifest |
+| `kubectl delete -f pod.yml` | Delete resources in a manifest |
+
+---
+
+## 14. Hands-on Practice Tasks
+
+1. Launch an Ubuntu 24.04 EC2 instance using `t3.medium` and at least 20 GB of storage.
+2. Install Docker, Minikube, and kubectl.
+3. Start Minikube and verify that the node is Ready.
+4. Create an NGINX Pod using the imperative approach.
+5. Create another Pod using a YAML manifest.
+6. Inspect Pods, logs, labels, and events.
+7. Create a ReplicaSet with three replicas.
+8. Delete one managed Pod and observe self-healing.
+9. Scale the ReplicaSet from three to ten replicas.
+10. Scale the ReplicaSet back to five replicas.
+11. Create four ReplicaSets for Internet Banking, Mobile Banking, Insurance, and Loans.
+12. Create a Deployment and practise image updates and rollbacks.
+13. Upload your YAML manifests and study notes to GitHub.
+
+---
+
+## Important Notes
+
+- Use Ubuntu 24.04 LTS, `t3.medium`, and at least 20 GB storage for this lab.
+- Run Minikube as the normal `ubuntu` user when using the Docker driver.
+- Containers in a Pod share the network namespace; storage is shared only when volumes are mounted appropriately.
+- A standalone Pod is not automatically recreated by a ReplicaSet.
+- A ReplicaSet provides replica management and self-healing, while Services normally provide stable network access.
+- Use Deployments for application updates and rollbacks.
+- Avoid reusing labels for unrelated workloads because selectors can match unintended Pods.
+- For production environments, learn resource requests and limits, probes, Services, ConfigMaps, Secrets, persistent volumes, security, and networking.
+
+## Learning Progress
+
+Topics covered:
+
+- Minikube installation
+- kubectl fundamentals
+- Pods
+- Imperative and declarative creation
+- YAML manifests
+- Labels and selectors
+- ReplicaSets
+- Scaling
+- ReplicationController comparison
+- Deployment basics
+
+### Next Topics
+
+- Kubernetes Deployments in depth
+- Services and load balancing
+- Namespaces
+- ConfigMaps and Secrets
+- Ingress
+- Persistent Volumes and Persistent Volume Claims
+- Liveness and Readiness Probes
+- Resource Requests and Limits
+- Kubernetes troubleshooting
+
+---
+
+**Repository:** [Kubernetes Complete Study Notes](https://github.com/Ajaykumarreddy1229/Kubernetes-K8s-Complete-Study-Notes-for-DevOps-and-Cloud-Engineers)
+
+**Learning Goal:** Build practical Kubernetes skills for DevOps and Cloud Engineering roles.
