@@ -1,0 +1,800 @@
+# Kubernetes Deployments, Multi-Container Pods, Jobs & CronJobs
+
+## 📌 Overview
+
+In this section, I learned how Kubernetes manages application deployments, maintains the desired number of Pods, updates application versions, rolls back failed updates, and runs tasks either once or on a schedule.
+
+### Topics Covered
+
+- Kubernetes Deployment
+- Scaling Applications
+- Rolling Updates and Rollbacks
+- Deployment Strategies
+- Multi-Container Pods
+- Kubernetes Jobs
+- Non-Parallel Jobs
+- Parallel Jobs
+- Work Queue Patterns
+- Kubernetes CronJobs
+- Pod Restart Policies
+- Important kubectl Commands
+
+---
+
+# 1. Kubernetes Deployment
+
+## What is a Deployment?
+
+A Kubernetes Deployment is a resource used to manage applications running in Kubernetes.
+
+It helps us:
+
+- Maintain the desired number of application Pods.
+- Scale applications up and down.
+- Update application versions.
+- Replace failed or deleted Pods.
+- Roll back to a previous application version.
+- Manage application updates with minimal downtime.
+
+## Deployment Architecture
+
+Developer creates a Deployment manifest.
+
+Deployment → ReplicaSet → Pods → Containers
+
+**Important:** A Deployment manages ReplicaSets, and ReplicaSets maintain the required number of Pods.
+
+## Deployment vs ReplicaSet
+
+| Feature | ReplicaSet | Deployment |
+|---|---|---|
+| Maintains the desired number of Pods | Yes | Yes, through ReplicaSets |
+| Automatically replaces deleted Pods | Yes | Yes |
+| Supports controlled application updates | No built-in rollout management | Yes |
+| Supports rollout history and rollback | No | Yes |
+| Supports scaling | Yes | Yes |
+
+## Create a Deployment
+
+Create a file named `deployment.yml`.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: trainerreyaz/ib-image:latest
+```
+
+### Explanation
+
+- `apiVersion`: Specifies the Kubernetes API version.
+- `kind: Deployment`: Creates a Deployment resource.
+- `metadata.name`: Name of the Deployment.
+- `replicas: 3`: Maintains three Pods.
+- `selector`: Identifies the Pods managed by the Deployment.
+- `template`: Defines how the Pods should be created.
+- `image`: Specifies the container image.
+
+### Commands
+
+```bash
+kubectl create -f deployment.yml
+kubectl get deployments
+kubectl get deploy -o wide
+kubectl get rs
+kubectl get pods
+kubectl describe deploy ib-deployment
+```
+
+Delete the Deployment:
+
+```bash
+kubectl delete deployment ib-deployment
+```
+
+## Scaling a Deployment
+
+Scaling means increasing or decreasing the number of application replicas.
+
+### Scale Out
+
+Increase the number of Pods to 10.
+
+```bash
+kubectl scale deployment/ib-deployment --replicas=10
+kubectl get pods
+```
+
+### Scale In
+
+Reduce the number of Pods to 5.
+
+```bash
+kubectl scale deployment/ib-deployment --replicas=5
+kubectl get pods
+```
+
+### Automatic Pod Recovery
+
+If a managed Pod is deleted, the ReplicaSet attempts to create a replacement Pod to maintain the desired replica count.
+
+```bash
+kubectl get pods
+kubectl delete pod <pod-name>
+kubectl get pods
+```
+
+**Real-world example:** If an Internet Banking application needs more capacity during busy hours, we can increase the replica count.
+
+---
+
+# 2. Rolling Updates and Rollbacks
+
+## What is a Rolling Update?
+
+A rolling update gradually replaces the old version of an application with a new version.
+
+For example:
+
+Old version: Internet Banking
+
+New version: Mobile Banking
+
+Kubernetes can create replacement Pods and terminate old Pods in a controlled sequence, according to the Deployment's update strategy and availability settings.
+
+## Update the Application Image
+
+A direct way to update the image is:
+
+```bash
+kubectl set image deployment/ib-deployment cont1=trainerreyaz/mb-image:latest
+```
+
+Here, `cont1` is the container name in the Deployment, and `trainerreyaz/mb-image:latest` is the new image.
+
+Watch the update:
+
+```bash
+kubectl get pods --watch
+kubectl rollout status deployment/ib-deployment
+kubectl describe deployment ib-deployment
+```
+
+Check the image:
+
+```bash
+kubectl get deployment ib-deployment -o wide
+kubectl get pods -o wide
+```
+
+**Note:** Replace the example mobile banking image with an image that exists in your registry.
+
+## Rollout Commands
+
+### View Rollout History
+
+```bash
+kubectl rollout history deployment/ib-deployment
+```
+
+### Undo the Last Update
+
+```bash
+kubectl rollout undo deployment/ib-deployment
+```
+
+### Check Rollout Status
+
+```bash
+kubectl rollout status deployment/ib-deployment
+```
+
+### Pause a Rollout
+
+```bash
+kubectl rollout pause deployment/ib-deployment
+```
+
+### Resume a Rollout
+
+```bash
+kubectl rollout resume deployment/ib-deployment
+```
+
+**Important:** A paused Deployment rollout cannot be rolled back until it is resumed. Rollback history also depends on the retained ReplicaSets.
+
+---
+
+# 3. Deployment Strategies
+
+Kubernetes Deployments support two main update strategies.
+
+## RollingUpdate
+
+This is the default Deployment strategy.
+
+- Gradually replaces old Pods with new Pods.
+- Can keep the application available during updates.
+- Supports configuring `maxSurge` and `maxUnavailable`.
+- Actual availability depends on application readiness, capacity, and configuration.
+
+## Recreate
+
+Terminates the old Pods before creating the new Pods.
+
+- Simple update process.
+- Usually causes downtime while the old Pods are terminated and new Pods start.
+- Useful when different application versions cannot run simultaneously.
+
+### Recreate Example
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+spec:
+  replicas: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: trainerreyaz/ib-image:latest
+```
+
+## Blue-Green Deployment
+
+- Blue represents the existing application version.
+- Green represents the new version.
+- Test the green version before switching user traffic.
+- Traffic switching is commonly implemented using Services, routing rules, or an ingress layer.
+
+## Canary Deployment
+
+- Release the new version to a small percentage of users or traffic.
+- Monitor errors and performance.
+- Gradually increase traffic if the release is healthy.
+
+**Note:** Blue-green and canary releases are deployment patterns, not separate built-in Deployment strategy types.
+
+---
+
+# 4. Exposing an Application
+
+## containerPort
+
+`containerPort` documents the port on which a container expects to receive traffic. It does not independently expose the application to the internet.
+
+Example:
+
+```yaml
+containers:
+- name: cont1
+  image: trainerreyaz/ib-image:latest
+  ports:
+  - containerPort: 8080
+```
+
+## hostPort
+
+`hostPort` binds a port on the worker node to a port in the container.
+
+```yaml
+ports:
+- containerPort: 8080
+  hostPort: 8080
+```
+
+Use `hostPort` only when the direct node-port binding is specifically required. It can cause port conflicts when multiple Pods are scheduled on the same node.
+
+## Kubernetes Service
+
+A Service provides a stable network endpoint for accessing a group of Pods.
+
+Common Service types:
+
+- `ClusterIP`: Access from within the cluster.
+- `NodePort`: Exposes a port on cluster nodes.
+- `LoadBalancer`: Requests an external load balancer when supported by the environment.
+
+**Important:** A Deployment manages application Pods; a Service provides network access to them.
+
+---
+
+# 5. Multi-Container Pods
+
+## What is a Multi-Container Pod?
+
+A Pod can contain more than one container.
+
+Containers in the same Pod share the Pod's network namespace and can communicate through `localhost`. They can also share storage when configured with a common volume.
+
+Typical use cases include:
+
+- Application container with a logging sidecar.
+- Application container with a proxy.
+- Application container with a supporting agent.
+
+## Example: One Pod with Two Containers
+
+Create `pod-two-containers.yaml`.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: two-container-pod
+  labels:
+    app: multi-container
+spec:
+  containers:
+  - name: nginx-container
+    image: nginx
+    ports:
+    - containerPort: 80
+  - name: busybox-container
+    image: busybox
+    command:
+    - sh
+    - -c
+    - while true; do echo 'Hello from BusyBox'; sleep 10; done
+```
+
+### Create and Inspect the Pod
+
+```bash
+kubectl apply -f pod-two-containers.yaml
+kubectl get pods
+kubectl describe pod two-container-pod
+```
+
+A Pod status of `2/2` in the READY column means both containers are ready.
+
+### View Container Logs
+
+```bash
+kubectl logs two-container-pod -c busybox-container
+kubectl logs two-container-pod -c nginx-container
+```
+
+### Access a Specific Container
+
+```bash
+kubectl exec -it two-container-pod -c nginx-container -- sh
+```
+
+Inside the NGINX container:
+
+```bash
+cd /usr/share/nginx/html
+```
+
+Access the BusyBox container:
+
+```bash
+kubectl exec -it two-container-pod -c busybox-container -- sh
+```
+
+**Note:** Multiple containers in a Pod are not the same as multiple Pods. They share the Pod's IP address, so containers cannot bind to the same port on that IP.
+
+---
+
+# 6. Kubernetes Jobs
+
+## What is a Job?
+
+A Kubernetes Job manages Pods that perform a task and eventually finish successfully.
+
+Unlike a Deployment, which normally runs a continuously available application, a Job is designed for finite work.
+
+### Examples
+
+- Database backups.
+- Report generation.
+- Batch processing.
+- Data migration.
+- Image processing.
+- One-time scripts.
+
+## Job Architecture
+
+Job manifest → Kubernetes Job controller → Pod → Task execution → Completion
+
+## Types of Job Workloads
+
+| Pattern | Purpose |
+|---|---|
+| Non-parallel Job | Execute tasks one at a time |
+| Parallel Job | Execute multiple tasks concurrently |
+| Work queue pattern | Workers process tasks from an external queue |
+| CronJob | Schedule Jobs at specified times |
+
+Work queues are an application architecture pattern rather than a separate Kubernetes Job resource type.
+
+---
+
+# 7. Non-Parallel Job
+
+A non-parallel Job is suitable for a task that needs to complete once.
+
+### Example
+
+Create `singlejob.yml`.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: single-job
+spec:
+  template:
+    spec:
+      containers:
+      - name: hello
+        image: busybox
+        command: ["sh", "-c", "echo Hello Students && sleep 5"]
+      restartPolicy: Never
+```
+
+### Commands
+
+```bash
+kubectl create -f singlejob.yml
+kubectl get jobs
+kubectl get pods
+kubectl logs <pod-name>
+```
+
+After the task finishes successfully, the Pod normally shows `Completed`.
+
+## Completions
+
+The `completions` field specifies how many successful task completions are required.
+
+Example:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: single-job
+spec:
+  completions: 5
+  template:
+    spec:
+      containers:
+      - name: hello
+        image: busybox
+        command: ["sh", "-c", "echo Hello Students && sleep 5"]
+      restartPolicy: Never
+```
+
+With `completions: 5` and no parallelism greater than the default of 1, Kubernetes completes five successful tasks sequentially.
+
+---
+
+# 8. Parallel Job
+
+A parallel Job runs multiple task Pods concurrently.
+
+### Important Fields
+
+| Field | Meaning |
+|---|---|
+| `completions` | Number of successful task completions required |
+| `parallelism` | Desired maximum number of concurrent Pods |
+
+### Example
+
+Create `parallel.yml`.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: parallel-job
+spec:
+  completions: 5
+  parallelism: 2
+  template:
+    spec:
+      containers:
+      - name: worker
+        image: busybox
+        command: ["sh", "-c", "echo Processing Task && sleep 10"]
+      restartPolicy: Never
+```
+
+### Commands
+
+```bash
+kubectl create -f parallel.yml
+kubectl get jobs
+kubectl get pods
+kubectl logs <pod-name>
+```
+
+### How It Works
+
+1. Two Pods can run concurrently.
+2. Successful task completions are counted.
+3. Kubernetes creates more task Pods as needed.
+4. The Job finishes when five successful completions have been recorded.
+
+Actual concurrency can be lower because of cluster capacity or scheduling constraints.
+
+**Real-world example:** Processing hundreds of images can be faster when multiple workers process separate tasks simultaneously.
+
+---
+
+# 9. Work Queue Pattern
+
+## What Is a Work Queue?
+
+A work queue stores tasks that worker applications retrieve and process.
+
+Examples of queue technologies:
+
+- RabbitMQ
+- Apache Kafka
+- Redis
+- Amazon SQS
+
+### Architecture
+
+External queue → Worker Pods → Task processing → Results
+
+Kubernetes does not provide a general-purpose message queue as part of a Job. A separate queue service or application-level task source is normally used.
+
+## Example Worker Job
+
+Create `queue.yml`.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: queue-job
+spec:
+  parallelism: 3
+  template:
+    spec:
+      containers:
+      - name: worker
+        image: busybox
+        command:
+        - sh
+        - -c
+        - |
+          echo "Worker processing task"
+          sleep 20
+      restartPolicy: Never
+```
+
+### Commands
+
+```bash
+kubectl create -f queue.yml
+kubectl get jobs
+kubectl get pods
+kubectl logs <pod-name>
+```
+
+### Important Behaviour
+
+This example starts worker Pods that print a message and exit. It does not connect to a real queue.
+
+For a real work queue:
+
+- The worker application must connect to the queue.
+- Workers retrieve and process tasks.
+- Workers need a defined exit condition.
+- Queue polling and error handling are implemented by the application.
+- Additional Pods depend on the Job configuration and controller behaviour.
+
+When `completions` is omitted and `parallelism` is set, the Job does not automatically run an unlimited number of replacement workers. Configure the Job and worker lifecycle according to the intended queue-processing design.
+
+For continuously running queue consumers, a Deployment is often a better fit than a finite Job.
+
+---
+
+# 10. Pod Restart Policies
+
+The `restartPolicy` field controls how Kubernetes handles terminated containers within a Pod.
+
+| Policy | Behaviour | Common use |
+|---|---|---|
+| `Always` | Restart a terminated container | Deployments and ReplicaSets |
+| `OnFailure` | Restart when a container exits unsuccessfully | Jobs |
+| `Never` | Do not restart the container in that Pod | Jobs and debugging |
+
+### Always
+
+If the container exits, the kubelet attempts to restart it.
+
+### OnFailure
+
+If the container exits with a non-zero exit code, the kubelet attempts to restart it in the same Pod.
+
+### Never
+
+The container is not restarted in the same Pod. Depending on the controller and its retry settings, a new Pod may still be created.
+
+**Important:** A Job Pod cannot use `restartPolicy: Always`. Job templates must use `Never` or `OnFailure`.
+
+---
+
+# 11. Kubernetes CronJobs
+
+## What Is a CronJob?
+
+A CronJob creates Jobs according to a schedule.
+
+Common use cases:
+
+- Daily database backups.
+- Periodic reports.
+- Scheduled cleanup.
+- Regular data processing.
+- Recurring maintenance scripts.
+
+## CronJob Example
+
+Create `cron.yml`.
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hello-cronjob
+spec:
+  schedule: "*/1 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello-container
+            image: busybox
+            command: ["sh", "-c", "echo Hello from Kubernetes!"]
+          restartPolicy: Never
+```
+
+The schedule `*/1 * * * *` requests a run every minute.
+
+### Cron Schedule Format
+
+`minute hour day-of-month month day-of-week`
+
+For example:
+
+| Schedule | Meaning |
+|---|---|
+| `*/1 * * * *` | Every minute |
+| `0 * * * *` | At the start of every hour |
+| `0 0 * * *` | Daily at midnight |
+| `0 9 * * 1-5` | At 9:00 AM, Monday to Friday |
+
+The schedule is interpreted using the CronJob's configured time zone, or the controller's local time zone when none is configured.
+
+## Create and Inspect the CronJob
+
+```bash
+kubectl apply -f cron.yml
+kubectl get cronjobs
+kubectl describe cronjob hello-cronjob
+kubectl get jobs
+kubectl get pods
+```
+
+### View Logs
+
+```bash
+kubectl logs <pod-name>
+```
+
+### Delete the CronJob
+
+```bash
+kubectl delete cronjob hello-cronjob
+```
+
+Deleting a CronJob stops future scheduled Job creation. Existing Jobs and Pods may need separate cleanup depending on their status and deletion settings.
+
+**Important:** CronJob scheduling is approximate. A scheduled Job may occasionally be delayed or skipped, so tasks should be safe to retry and should not assume exactly-once execution.
+
+---
+
+# 12. Important kubectl Commands
+
+## Deployment Commands
+
+```bash
+kubectl get deployments
+kubectl get rs
+kubectl get pods
+kubectl describe deployment ib-deployment
+kubectl scale deployment/ib-deployment --replicas=5
+kubectl set image deployment/ib-deployment cont1=trainerreyaz/mb-image:latest
+kubectl rollout history deployment/ib-deployment
+kubectl rollout status deployment/ib-deployment
+kubectl rollout undo deployment/ib-deployment
+```
+
+## Pod Commands
+
+```bash
+kubectl get pods
+kubectl describe pod <pod-name>
+kubectl logs <pod-name>
+kubectl logs <pod-name> -c <container-name>
+kubectl exec -it <pod-name> -c <container-name> -- sh
+kubectl delete pod <pod-name>
+```
+
+## Job Commands
+
+```bash
+kubectl get jobs
+kubectl describe job <job-name>
+kubectl get pods
+kubectl logs <pod-name>
+kubectl delete job <job-name>
+```
+
+## CronJob Commands
+
+```bash
+kubectl get cronjobs
+kubectl describe cronjob hello-cronjob
+kubectl get jobs
+kubectl delete cronjob hello-cronjob
+```
+
+---
+
+# 13. What I Learned
+
+After completing these hands-on exercises, I learned how to:
+
+- Create and manage Kubernetes Deployments.
+- Understand the relationship between Deployments, ReplicaSets, and Pods.
+- Scale application replicas up and down.
+- Update application images.
+- Monitor rolling updates and perform rollbacks.
+- Compare RollingUpdate and Recreate strategies.
+- Understand Blue-Green and Canary deployment patterns.
+- Run multiple containers inside one Pod.
+- Create Jobs with successful completion requirements.
+- Configure parallel task execution.
+- Understand the difference between Jobs, work queues, and CronJobs.
+- Use Pod restart policies correctly.
+- Schedule recurring tasks using CronJobs.
+- Troubleshoot resources using `kubectl`.
+
+## Conclusion
+
+Kubernetes provides different resources for different workloads. Deployments manage continuously running applications, while Jobs handle finite tasks and CronJobs schedule those tasks. Understanding these resources is an important step toward learning Kubernetes application management and real-world DevOps practices.
