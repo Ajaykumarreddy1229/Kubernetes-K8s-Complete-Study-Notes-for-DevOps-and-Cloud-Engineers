@@ -1,0 +1,676 @@
+#Kubernetes Operations
+
+## Overview
+
+These notes cover Kubernetes administration, multi-node clusters, KOPS, workload deployment, namespaces, image pull policies, pod troubleshooting, reconciliation loops, immutable infrastructure, and idempotency.
+
+**Topics covered:**
+- Kubernetes multi-node clusters using KOPS
+- Scaling worker nodes and control planes
+- Deployments and replica scaling
+- Kubernetes namespaces
+- Image pull policies
+- Pod phases and common errors
+- Troubleshooting commands
+- Reconciliation loops and self-healing
+- Immutable infrastructure
+- Idempotency
+
+---
+
+## 1. Kubernetes Multi-Node Cluster
+
+### What is a multi-node cluster?
+
+A multi-node Kubernetes cluster contains multiple machines that work together to run and manage applications.
+
+A typical cluster contains:
+
+- **Control plane:** Manages the cluster and makes scheduling decisions.
+- **Worker nodes:** Run application Pods.
+- **API server:** Provides the Kubernetes API.
+- **Scheduler:** Selects suitable nodes for Pods.
+- **Controller manager:** Reconciles resources toward their desired state.
+- **etcd:** Stores Kubernetes cluster state.
+- **Kubelet:** Ensures Pods assigned to a node run as expected.
+- **Container runtime:** Runs containers.
+
+### Why use a multi-node cluster?
+
+A single-node cluster can become unavailable if its only node fails. Multiple worker nodes allow workloads to run across different machines.
+
+Benefits:
+- Improved workload availability.
+- Ability to scale applications.
+- Better distribution of workloads.
+- Recovery from individual node failures when sufficient capacity exists.
+- Support for production-style deployments.
+
+**Important:** Multiple worker nodes alone do not guarantee high availability. You also need appropriate control-plane availability, replica placement, networking, storage, and application health checks.
+
+---
+
+## 2. KOPS – Kubernetes Operations
+
+KOPS is a command-line tool for creating, managing, upgrading, and deleting Kubernetes clusters on supported cloud infrastructure, including AWS.
+
+It automates much of the cluster infrastructure setup.
+
+### Advantages
+
+- Automates infrastructure provisioning.
+- Supports cluster upgrades.
+- Supports rolling updates.
+- Manages instance groups.
+- Reduces manual cluster administration.
+- Can configure highly available control planes when designed appropriately.
+
+### Alternatives
+
+- Amazon EKS
+- kubeadm
+- Minikube
+- Rancher
+- Terraform, often used with other Kubernetes provisioning tools
+
+These tools are not identical alternatives: for example, Minikube is primarily for local learning, while EKS is a managed Kubernetes service.
+
+### Basic KOPS administration
+
+Check cluster configuration:
+
+```bash
+kops get cluster
+kops get ig
+kubectl get nodes
+kubectl get nodes -o wide
+```
+
+`ig` means **Instance Group**.
+
+KOPS manages cluster infrastructure and configuration. `kubectl` manages Kubernetes resources such as Pods, Deployments, and Services.
+
+Kubernetes client credentials and contexts are normally stored in:
+
+```bash
+cat ~/.kube/config
+kubectl config view
+```
+
+Treat this configuration as sensitive because it can contain credentials and certificate data.
+
+---
+
+## 3. Scaling Worker Nodes
+
+Worker nodes provide the compute capacity for application workloads.
+
+With a KOPS-managed cluster, worker capacity can be adjusted through the appropriate instance group.
+
+Example:
+
+```bash
+kops get ig
+kops edit ig nodes-ap-south-1a --name=reyaz.k8s.local
+```
+
+Update the instance group's `minSize` and `maxSize` according to your desired capacity and available AWS resources.
+
+Review and apply the configuration:
+
+```bash
+kops update cluster --name reyaz.k8s.local
+```
+
+After reviewing the proposed changes, apply them using the appropriate command for your KOPS version and environment.
+
+```bash
+kops update cluster --name reyaz.k8s.local --yes
+kops rolling-update cluster --name reyaz.k8s.local
+```
+
+Check node registration:
+
+```bash
+kubectl get nodes -o wide
+```
+
+New instances need time to launch, initialize, and register with Kubernetes.
+
+**Note:** Exact KOPS flags and rolling-update requirements depend on the installed version and cluster configuration. Follow the output of `kops update cluster` and `kops rolling-update cluster` before applying changes.
+
+### What is an Instance Group?
+
+An Instance Group defines a group of similar cluster machines and their configuration, such as machine type, minimum size, and maximum size.
+
+---
+
+## 4. Control Plane High Availability
+
+A highly available Kubernetes control plane uses multiple control-plane instances so that the failure of one instance does not necessarily stop cluster management.
+
+Conceptual architecture:
+
+```text
+              kubectl
+                 |
+          Load Balancer
+                 |
+        +--------+--------+
+        |        |        |
+       CP1      CP2      CP3
+        |        |        |
+        +--------+--------+
+                 |
+              Workers
+                 |
+           Application Pods
+```
+
+A production-ready highly available control plane also requires appropriate API server endpoints, etcd availability, and failure-domain planning.
+
+### KOPS control-plane scaling
+
+Inspect the instance groups first:
+
+```bash
+kops get ig --name reyaz.k8s.local
+```
+
+Edit the relevant control-plane instance group only after confirming that your KOPS version and cluster configuration support the intended topology.
+
+Apply and validate changes:
+
+```bash
+kops update cluster --name reyaz.k8s.local
+kubectl get nodes -o wide
+```
+
+**Important:** Do not assume that changing `minSize` and `maxSize` alone creates a complete highly available control plane. A production topology must account for availability zones, load balancing, and etcd quorum. For three etcd voting members, a majority of two must remain available.
+
+### Node failure and recovery
+
+If a machine is managed by an appropriate Auto Scaling Group, AWS may replace a terminated instance. However, Kubernetes must still recognize the replacement, and Pods must be rescheduled successfully.
+
+Deleting a node is not the same as safely draining it. For planned maintenance, use:
+
+```bash
+kubectl drain NODE_NAME --ignore-daemonsets
+kubectl uncordon NODE_NAME
+```
+
+Use these commands carefully and check Pod disruption budgets and storage constraints before draining a production node.
+
+---
+
+## 5. Kubernetes Deployments
+
+A Deployment manages replicated application Pods through ReplicaSets.
+
+Example: `deployment.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+        - name: cont1
+          image: trainerreyaz/ib-image:latest
+```
+
+Create or update the Deployment:
+
+```bash
+kubectl apply -f deployment.yml
+kubectl get deployments
+kubectl get pods -o wide
+kubectl get nodes -o wide
+```
+
+The `-o wide` option displays additional information, including the node hosting each Pod.
+
+### Scale out Pods
+
+```bash
+kubectl scale deployment/ib-deployment --replicas=10
+kubectl get pods -o wide
+```
+
+### Scale in Pods
+
+```bash
+kubectl scale deployment/ib-deployment --replicas=4
+kubectl get pods -o wide
+```
+
+### Important scheduling concept
+
+Kubernetes schedules ordinary application Pods onto eligible nodes according to resource availability, scheduling constraints, and policies. Control-plane nodes are often tainted to prevent ordinary workloads from running on them, but this is configurable.
+
+Kubernetes does not guarantee that Pods will be distributed equally across workers. Use topology spread constraints or pod anti-affinity when placement across nodes or zones is important.
+
+### Example: Mobile banking Deployment
+
+Save this as `deploynew.yml`:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mb-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 4
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+        - name: cont1
+          image: trainerreyaz/mb-image:latest
+```
+
+Apply and verify:
+
+```bash
+kubectl apply -f deploynew.yml
+kubectl get pods -o wide
+kubectl scale deployment/mb-deployment --replicas=10
+```
+
+---
+
+## 6. Kubernetes Namespaces
+
+A Namespace logically separates resources inside the same Kubernetes cluster. Think of it as a way to organize resources into separate workspaces.
+
+Namespaces are useful for:
+- Development, testing, and production environments.
+- Team-based resource organization.
+- Role-Based Access Control (RBAC).
+- Resource quotas and limit ranges.
+- Applying namespace-scoped policies.
+
+### Common namespaces
+
+| Namespace | Purpose |
+|---|---|
+| `default` | Default location for resources when no namespace is specified |
+| `kube-system` | Core Kubernetes system components |
+| `kube-public` | Publicly readable resources where configured |
+| `kube-node-lease` | Node Lease objects used for node heartbeats |
+
+### Namespace commands
+
+```bash
+kubectl get namespaces
+kubectl get ns
+kubectl create namespace dev
+kubectl create namespace prod
+kubectl get pods -A
+kubectl get pods -n dev
+kubectl get pods -n prod
+```
+
+`-A` is shorthand for `--all-namespaces`.
+
+### Create Pods in different namespaces
+
+```bash
+kubectl run dev1 --image=nginx -n dev
+kubectl run dev2 --image=nginx -n dev
+kubectl run prod1 --image=nginx -n prod
+kubectl run prod2 --image=nginx -n prod
+```
+
+View Pods:
+
+```bash
+kubectl get pods -n dev
+kubectl get pods -n prod
+```
+
+### Set the current namespace
+
+```bash
+kubectl config set-context --current --namespace=dev
+kubectl config view --minify
+```
+
+To switch to production:
+
+```bash
+kubectl config set-context --current --namespace=prod
+```
+
+The context's default namespace changes, but this does not move existing resources or prevent access to other namespaces.
+
+### Delete resources
+
+```bash
+kubectl delete pod dev1 -n dev
+kubectl delete pod prod1 -n prod
+kubectl delete pods --all -n dev
+```
+
+Delete a namespace and its namespaced resources:
+
+```bash
+kubectl delete namespace dev
+```
+
+### Namespace isolation and DNS
+
+Namespaces provide logical organization, not automatic network isolation. Pods can often communicate across namespaces unless network policies or other controls restrict them.
+
+A Kubernetes Service can be addressed by its DNS name:
+
+```text
+service-name.namespace.svc.cluster.local
+```
+
+Example:
+
+```text
+mysql.dev.svc.cluster.local
+```
+
+### RBAC security
+
+Use Role, RoleBinding, ClusterRole, and ClusterRoleBinding to control permissions. Combine RBAC with network policies and resource quotas where needed.
+
+**Remember:** A namespace is not a separate cluster or a complete security boundary by itself.
+
+---
+
+## 7. Image Pull Policy
+
+`imagePullPolicy` determines when Kubernetes attempts to retrieve a container image from its registry.
+
+| Policy | Meaning |
+|---|---|
+| `Always` | The runtime resolves the image reference against the registry when starting a container |
+| `IfNotPresent` | Uses a locally available image; otherwise, attempts to pull it |
+| `Never` | Does not pull the image; it must already be available locally |
+
+Example:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx-example
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.25
+      imagePullPolicy: IfNotPresent
+```
+
+### Default behavior
+
+When `imagePullPolicy` is omitted, Kubernetes typically defaults it as follows when the Pod is first created:
+
+| Image reference | Default policy |
+|---|---|
+| `nginx:latest` | `Always` |
+| `nginx` (tag omitted) | `Always` |
+| `nginx:1.25` | `IfNotPresent` |
+| An image using a digest | `IfNotPresent` |
+
+The default is set when the object is created; changing an image tag later does not necessarily recalculate the policy.
+
+### Common image-pull errors
+
+**ErrImagePull:** An image pull attempt failed.
+
+Possible causes:
+- Incorrect image name or tag.
+- Image does not exist.
+- Registry is unavailable.
+- Private registry credentials are missing or incorrect.
+
+**ImagePullBackOff:** Kubernetes is retrying the image pull with increasing delays.
+
+**ErrImageNeverPull:** The requested image is unavailable locally when `Never` is specified.
+
+The kubelet coordinates image retrieval through the configured container runtime.
+
+### Production recommendation
+
+Prefer immutable image references, such as version tags or image digests, rather than relying on `latest`. This improves deployment consistency and makes rollbacks more predictable.
+
+---
+
+## 8. Pod Phases and Common Errors
+
+### Official Pod phases
+
+| Phase | Meaning |
+|---|---|
+| `Pending` | Pod accepted, but containers are not yet running |
+| `Running` | Pod is bound to a node and at least one container is running, starting, or restarting |
+| `Succeeded` | All containers completed successfully |
+| `Failed` | All containers have terminated and at least one failed |
+| `Unknown` | Kubernetes cannot determine the Pod's state |
+
+A Pod's displayed `STATUS` can show values such as `CrashLoopBackOff` or `ContainerCreating`. These are not additional official Pod phases.
+
+### Common errors
+
+**CrashLoopBackOff**
+
+A container repeatedly exits and Kubernetes delays restart attempts.
+
+Possible causes:
+- Application crash.
+- Invalid configuration.
+- Missing environment variables.
+- Unavailable dependencies.
+
+**ImagePullBackOff**
+
+Kubernetes cannot pull the specified image and is retrying.
+
+**CreateContainerConfigError**
+
+Container creation is blocked by an invalid configuration, such as a missing Secret or ConfigMap.
+
+**CreateContainerError**
+
+The runtime cannot create the container, possibly because of invalid settings, permissions, or mount problems.
+
+**OOMKilled**
+
+The container was terminated because it exceeded its memory limit or was killed due to memory pressure.
+
+**ContainerCreating**
+
+Kubernetes is preparing the container. This can involve image retrieval, networking, and volume mounting.
+
+**Terminating**
+
+The Pod is being deleted. A long termination can involve finalizers, slow shutdown, or storage-detachment issues.
+
+**Evicted**
+
+The kubelet evicted the Pod, commonly because of node resource pressure.
+
+### Troubleshooting commands
+
+```bash
+kubectl get pods -o wide
+kubectl describe pod POD_NAME
+kubectl logs POD_NAME
+kubectl logs POD_NAME --previous
+kubectl get events --sort-by=.metadata.creationTimestamp
+kubectl get nodes
+```
+
+For a Deployment, also check:
+
+```bash
+kubectl describe deployment DEPLOYMENT_NAME
+kubectl get replicasets
+```
+
+Use `kubectl delete pod --force --grace-period=0` only as a last resort after understanding the risks. Force deletion can leave processes running on an unreachable node and is not a general fix for stuck Pods.
+
+---
+
+## 9. Reconciliation Loop and Self-Healing
+
+Kubernetes continuously works to bring the actual state of a cluster closer to the desired state.
+
+Example:
+
+Desired state: four application replicas.
+
+If a Pod fails, its owning controller attempts to restore the replica count.
+
+```text
+Desired state: 4 replicas
+          |
+          v
+Kubernetes controllers
+          |
+          v
+Compare actual and desired state
+          |
+          v
+Create or replace Pods if needed
+          |
+          v
+Work toward 4 healthy replicas
+```
+
+### Why is this important?
+
+- Automatic recovery from many Pod failures.
+- Desired-state management.
+- Declarative configuration.
+- Support for automated scaling and rolling updates.
+
+**Important:** Self-healing cannot guarantee that an application is healthy or available if the entire cluster, all eligible nodes, its storage, or a critical dependency fails.
+
+---
+
+## 10. Immutable Infrastructure
+
+Immutable infrastructure means replacing infrastructure components with newly built versions instead of manually modifying existing components in place.
+
+### Traditional versus immutable
+
+| Traditional approach | Immutable approach |
+|---|---|
+| Modify an existing server | Build and replace with a new server |
+| Install changes manually | Automate configuration and deployment |
+| Risk of configuration drift | More repeatable environments |
+| Rollback can be difficult | Rollback can use a previous known-good version |
+
+### Examples
+
+- Docker: Build and deploy a new image.
+- Kubernetes: Roll out a new Pod template and replace Pods.
+- AWS: Build a new AMI and launch replacement instances.
+- Terraform: Update infrastructure declaratively, replacing resources when required.
+
+Kubernetes Deployments support controlled application rollouts. They do not make every Kubernetes resource or every infrastructure component inherently immutable.
+
+### Benefits
+
+- Consistent deployments.
+- Easier rollback.
+- Less configuration drift.
+- Better automation.
+- More repeatable environments.
+
+---
+
+## 11. Idempotency
+
+An operation is idempotent when repeating it produces the same intended result as performing it once.
+
+Example:
+
+```bash
+kubectl apply -f deployment.yml
+```
+
+Running this repeatedly converges the managed resource toward the configuration declared in the manifest, assuming the configuration and external conditions remain unchanged.
+
+Another example is a configuration-management task that ensures a user exists rather than blindly attempting to create a new user every time.
+
+### Idempotent versus non-idempotent
+
+| Idempotent operation | Non-idempotent example |
+|---|---|
+| Ensure a directory exists | Append the same line every run without checking |
+| Ensure a service is enabled | Create a new resource every run without checking |
+| Apply a Kubernetes manifest | Increment a counter each time |
+
+Idempotency is especially useful in automation, configuration management, and CI/CD pipelines because repeated runs become more predictable.
+
+---
+
+## 12. Useful Kubernetes Commands
+
+```bash
+kubectl get nodes -o wide
+kubectl get namespaces
+kubectl get pods -A
+kubectl get deployments -A
+kubectl get services -A
+kubectl describe pod POD_NAME
+kubectl logs POD_NAME
+kubectl apply -f deployment.yml
+kubectl scale deployment/DEPLOYMENT_NAME --replicas=5
+kubectl config view --minify
+```
+
+KOPS cluster cleanup, for a disposable lab only:
+
+```bash
+kops delete cluster --name reyaz.k8s.local --yes
+```
+
+**Warning:** Deleting a KOPS cluster can delete associated cloud resources and cause data loss. Confirm the cluster name, backups, and resources before running this command.
+
+---
+
+## 13. Interview Revision
+
+1. **What is KOPS?** A tool for provisioning and managing Kubernetes clusters on supported cloud infrastructure.
+2. **What is a multi-node cluster?** A cluster that uses multiple machines to run workloads and manage Kubernetes.
+3. **What is a Namespace?** A logical grouping of namespaced resources inside a cluster.
+4. **Do Namespaces automatically block network traffic?** No.
+5. **What does `ImagePullBackOff` mean?** Kubernetes is retrying a failed image pull.
+6. **What is a Deployment?** A controller that manages ReplicaSets and application replicas.
+7. **What is reconciliation?** The process of bringing actual state toward desired state.
+8. **What is immutable infrastructure?** Replacing components instead of manually modifying existing ones.
+9. **What is idempotency?** Repeating an operation produces the same intended result.
+10. **Does scaling replicas guarantee equal Pod distribution?** No; placement depends on scheduling rules and constraints.
+
+---
+
+## Conclusion
+
+These concepts form an important foundation for Kubernetes administration and DevOps interviews. Practice them in a lab before using infrastructure-changing commands in a production environment.
