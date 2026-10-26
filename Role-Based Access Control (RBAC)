@@ -1,0 +1,919 @@
+# Kubernetes RBAC and DaemonSet – Complete Notes with Practical Examples
+
+## 📌 Introduction
+
+In these notes, we will learn two important Kubernetes concepts:
+
+1. **Role-Based Access Control (RBAC)** – Managing permissions and security in Kubernetes.
+2. **DaemonSet** – Running a Pod on every eligible node in a Kubernetes cluster.
+
+These concepts are useful for DevOps Engineers, Cloud Engineers, Kubernetes Administrators, and anyone learning Kubernetes.
+
+---
+
+# 🔐 PART 1: ROLE-BASED ACCESS CONTROL (RBAC)
+
+## 1. What is RBAC in Kubernetes?
+
+RBAC stands for **Role-Based Access Control**.
+
+RBAC is a Kubernetes authorization mechanism used to control who can perform which actions on which resources in a Kubernetes cluster.
+
+In simple words:
+
+**RBAC decides who can access Kubernetes resources and what actions they can perform.**
+
+### Real-World Example
+
+Suppose a company has three teams:
+
+- Developers – Can view Pods and Deployments.
+- DevOps Engineers – Can create, update, and delete Deployments.
+- Administrators – Can manage the entire Kubernetes cluster.
+
+RBAC helps assign different permissions to each team.
+
+## 2. Why Do We Need RBAC?
+
+Without proper access control, users may have unnecessary permissions.
+
+RBAC provides:
+
+- Security
+- Least privilege access
+- Controlled resource access
+- Better permission management
+- Protection against accidental changes
+
+**Principle of Least Privilege:** Give users only the permissions required to perform their work.
+
+## 3. How RBAC Works
+
+```text
+User / ServiceAccount
+          |
+          v
+    Authentication
+     (Who are you?)
+          |
+          v
+     Authorization
+   (What can you do?)
+          |
+          v
+       RBAC Check
+          |
+          v
+    Allowed / Denied
+```
+
+### Example
+
+A developer runs:
+
+```bash
+kubectl delete pod nginx
+```
+
+Kubernetes checks whether the developer has permission to delete Pods.
+
+If permission exists, the operation is allowed.
+
+Otherwise, the request is denied.
+
+## 4. Core RBAC Concepts
+
+RBAC mainly uses four concepts.
+
+### 4.1 Subject – WHO?
+
+A subject represents an identity requesting access.
+
+Examples:
+
+- User
+- Group
+- ServiceAccount
+
+### 4.2 Resource – WHAT?
+
+Resources are Kubernetes objects.
+
+Examples:
+
+```text
+pods
+services
+deployments
+configmaps
+secrets
+nodes
+```
+
+### 4.3 Verbs – ACTIONS
+
+Verbs define which actions are allowed.
+
+| Verb | Meaning |
+|---|---|
+| get | Read one resource |
+| list | List multiple resources |
+| watch | Monitor resource changes |
+| create | Create resources |
+| update | Modify resources |
+| patch | Partially modify resources |
+| delete | Delete resources |
+
+### 4.4 Scope – WHERE?
+
+RBAC permissions can apply at two levels:
+
+- Namespace level
+- Cluster level
+
+## 5. Four Main RBAC Components
+
+| Component | Scope | Purpose |
+|---|---|---|
+| Role | Namespace | Defines namespace permissions |
+| RoleBinding | Namespace | Assigns permissions to subjects |
+| ClusterRole | Cluster | Defines reusable or cluster-level permissions |
+| ClusterRoleBinding | Cluster | Assigns permissions across the cluster |
+
+### Important
+
+A Role defines permissions.
+
+A RoleBinding assigns those permissions to a user, group, or ServiceAccount.
+
+Similarly, a ClusterRole defines permissions, while a ClusterRoleBinding assigns them across the cluster.
+
+A ClusterRole can also be assigned using a RoleBinding to restrict namespaced access to one namespace.
+
+## 6. Authentication vs Authorization
+
+| Authentication | Authorization |
+|---|---|
+| Who are you? | What can you do? |
+| Verifies identity | Checks permissions |
+| Uses certificates, tokens, OIDC | Uses RBAC or other authorization mechanisms |
+
+### Authentication Methods
+
+- Client certificates
+- OpenID Connect (OIDC)
+- Cloud identity providers
+- ServiceAccount tokens
+
+**Note:** Kubernetes does not provide a normal built-in User API object. Human users are generally managed through external identity systems.
+
+## 7. Users vs ServiceAccounts
+
+| Users | ServiceAccounts |
+|---|---|
+| Usually represent humans | Usually represent applications |
+| Managed outside Kubernetes | Managed inside Kubernetes |
+| May use certificates or OIDC | Use Kubernetes ServiceAccount credentials |
+| Used by developers and administrators | Used by Pods, controllers, and automation |
+
+### Example
+
+A developer logs in using company SSO.
+
+A monitoring application accesses Kubernetes using a ServiceAccount.
+
+---
+
+# 🧪 PART 2: NAMESPACE-LEVEL RBAC PRACTICAL
+
+## Objective
+
+Create a ServiceAccount named `jack` and allow it to:
+
+- Get Pods
+- List Pods
+- Watch Pods
+
+It must not be allowed to create or delete Pods.
+
+### Step 1: Create Namespace
+
+```bash
+kubectl create namespace dev
+```
+
+Set the default namespace:
+
+```bash
+kubectl config set-context --current --namespace=dev
+```
+
+### Step 2: Create ServiceAccount
+
+Create a file:
+
+```bash
+vi serviceaccount.yml
+```
+
+Add:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jack
+  namespace: dev
+```
+
+Apply:
+
+```bash
+kubectl apply -f serviceaccount.yml
+```
+
+Verify:
+
+```bash
+kubectl get serviceaccounts -n dev
+```
+
+### Step 3: Create Role
+
+Create:
+
+```bash
+vi role.yml
+```
+
+Add:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dev-pod-reader
+  namespace: dev
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+```
+
+Apply:
+
+```bash
+kubectl apply -f role.yml
+```
+
+Verify:
+
+```bash
+kubectl get roles -n dev
+```
+
+### Explanation
+
+- `apiGroups: [""]` represents the core Kubernetes API group.
+- `resources: ["pods"]` means the permissions apply to Pods.
+- `verbs` defines allowed operations.
+
+### Step 4: Create RoleBinding
+
+Create:
+
+```bash
+vi rolebinding.yml
+```
+
+Add:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: read-pods
+  namespace: dev
+subjects:
+  - kind: ServiceAccount
+    name: jack
+    namespace: dev
+roleRef:
+  kind: Role
+  name: dev-pod-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+Apply:
+
+```bash
+kubectl apply -f rolebinding.yml
+```
+
+**Important:** Since `jack` is a ServiceAccount, use `kind: ServiceAccount`, not `kind: User`.
+
+### Step 5: Verify Permissions
+
+Check list permission:
+
+```bash
+kubectl auth can-i list pods \
+  -n dev \
+  --as=system:serviceaccount:dev:jack
+```
+
+Expected:
+
+```text
+yes
+```
+
+Check create permission:
+
+```bash
+kubectl auth can-i create pods \
+  -n dev \
+  --as=system:serviceaccount:dev:jack
+```
+
+Expected:
+
+```text
+no
+```
+
+Check delete permission:
+
+```bash
+kubectl auth can-i delete pods \
+  -n dev \
+  --as=system:serviceaccount:dev:jack
+```
+
+Expected:
+
+```text
+no
+```
+
+These results assume no other permissions are granted to the ServiceAccount.
+
+**Note:** Impersonation using `--as` requires the person running the command to have impersonation permissions.
+
+### Step 6: Check RBAC Resources
+
+```bash
+kubectl get roles -n dev
+```
+
+```bash
+kubectl get rolebindings -n dev
+```
+
+```bash
+kubectl describe rolebinding read-pods -n dev
+```
+
+---
+
+# 🌐 PART 3: CLUSTERROLE AND CLUSTERROLEBINDING PRACTICAL
+
+## Objective
+
+Allow a ServiceAccount to view Pods in all namespaces.
+
+### Real-World Scenario
+
+A monitoring application needs to collect Pod information from every namespace.
+
+Instead of creating a separate Role in each namespace, we can use ClusterRole and ClusterRoleBinding.
+
+### Step 1: Create ClusterRole
+
+Create:
+
+```bash
+vi clusterrole.yml
+```
+
+Add:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pod-reader
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+```
+
+Apply:
+
+```bash
+kubectl apply -f clusterrole.yml
+```
+
+Verify:
+
+```bash
+kubectl get clusterroles
+```
+
+### Step 2: Create ServiceAccount
+
+```bash
+kubectl create serviceaccount reyaz -n dev
+```
+
+Verify:
+
+```bash
+kubectl get serviceaccounts -n dev
+```
+
+### Step 3: Create ClusterRoleBinding
+
+Create:
+
+```bash
+vi clusterrolebinding.yml
+```
+
+Add:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: read-pods-global
+subjects:
+  - kind: ServiceAccount
+    name: reyaz
+    namespace: dev
+roleRef:
+  kind: ClusterRole
+  name: pod-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
+Apply:
+
+```bash
+kubectl apply -f clusterrolebinding.yml
+```
+
+### Step 4: Test Permissions
+
+Check whether the ServiceAccount can list Pods across namespaces:
+
+```bash
+kubectl auth can-i list pods \
+  --all-namespaces \
+  --as=system:serviceaccount:dev:reyaz
+```
+
+Expected:
+
+```text
+yes
+```
+
+Check delete permission:
+
+```bash
+kubectl auth can-i delete pods \
+  -n dev \
+  --as=system:serviceaccount:dev:reyaz
+```
+
+Expected:
+
+```text
+no
+```
+
+## 8. Role vs ClusterRole
+
+| Role | ClusterRole |
+|---|---|
+| Namespaced resource | Cluster-scoped resource |
+| Defines permissions within a namespace | Defines permissions that can be reused across namespaces |
+| Cannot grant access to cluster-scoped resources | Can grant access to cluster-scoped resources |
+| Used with RoleBinding | Used with RoleBinding or ClusterRoleBinding |
+
+## 9. RoleBinding vs ClusterRoleBinding
+
+| RoleBinding | ClusterRoleBinding |
+|---|---|
+| Namespaced | Cluster-scoped |
+| Grants access within one namespace | Grants access across the cluster |
+| Can reference Role or ClusterRole | References ClusterRole |
+
+## 10. Real-World RBAC Use Cases
+
+| Use Case | Example |
+|---|---|
+| Developer access | View Pods in the development namespace |
+| Monitoring | Read resources across namespaces |
+| CI/CD | Deploy applications to approved namespaces |
+| Security | Restrict access to Secrets |
+| Operations | Allow selected administrators to manage cluster resources |
+
+## 11. RBAC Best Practices
+
+1. Follow the least privilege principle.
+2. Avoid unnecessary `cluster-admin` access.
+3. Use namespace-level permissions whenever possible.
+4. Create separate ServiceAccounts for different applications.
+5. Review permissions regularly.
+6. Avoid wildcard permissions unless necessary.
+7. Restrict access to Secrets.
+8. Test permissions using `kubectl auth can-i`.
+9. Prefer short-lived ServiceAccount tokens.
+10. Audit and review RoleBindings and ClusterRoleBindings.
+
+## 12. RBAC Interview Questions
+
+**Q1. What is RBAC?**
+
+RBAC is a Kubernetes authorization mechanism that controls access to cluster resources.
+
+**Q2. What are the four main RBAC components?**
+
+Role, RoleBinding, ClusterRole, and ClusterRoleBinding.
+
+**Q3. What is the difference between authentication and authorization?**
+
+Authentication verifies identity. Authorization checks permissions.
+
+**Q4. Can a RoleBinding reference a ClusterRole?**
+
+Yes. It grants the ClusterRole's namespaced permissions within the RoleBinding's namespace.
+
+**Q5. Can RBAC explicitly deny access?**
+
+No. RBAC uses allow rules. It does not support explicit deny rules.
+
+**Q6. How do you check permissions?**
+
+```bash
+kubectl auth can-i list pods -n dev
+```
+
+**Q7. What are the default user-facing ClusterRoles?**
+
+- cluster-admin
+- admin
+- edit
+- view
+
+**Q8. Can RBAC protect Secrets?**
+
+Yes. RBAC can control access to Kubernetes Secrets.
+
+**Q9. Can RBAC restrict specific actions?**
+
+Yes. For example, it can allow `get` and `list` without allowing `delete`.
+
+**Q10. How do ServiceAccounts receive permissions?**
+
+Through RoleBindings and ClusterRoleBindings.
+
+---
+
+# 🚀 PART 4: KUBERNETES DAEMONSET
+
+## 1. What is a DaemonSet?
+
+A **DaemonSet** is a Kubernetes workload controller that ensures a copy of a Pod runs on every eligible node, or on selected nodes, in a cluster.
+
+In simple words:
+
+**DaemonSet automatically runs one Pod on each eligible node.**
+
+It is commonly used for node-level applications.
+
+## 2. Why Do We Need DaemonSet?
+
+Suppose a Kubernetes cluster contains 10 worker nodes.
+
+You need a log collection application on every node.
+
+Creating 10 Pods manually would be difficult to maintain.
+
+DaemonSet automatically manages the Pods.
+
+When a new eligible node joins the cluster, the DaemonSet creates a Pod on that node.
+
+When a node is removed, the corresponding DaemonSet Pod is cleaned up.
+
+## 3. DaemonSet Architecture
+
+```text
+             Kubernetes Cluster
+                     |
+                     v
+                  DaemonSet
+                     |
+          -----------------------
+          |          |          |
+          v          v          v
+        Node 1     Node 2     Node 3
+          |          |          |
+          v          v          v
+        Pod        Pod        Pod
+```
+
+When a new eligible node is added:
+
+```text
+New Node Joins
+      |
+      v
+DaemonSet Controller
+      |
+      v
+Creates Pod on New Node
+```
+
+## 4. Real-World DaemonSet Use Cases
+
+| Use Case | Example |
+|---|---|
+| Log collection | Fluent Bit, Fluentd |
+| Monitoring | Prometheus Node Exporter |
+| Security | Falco |
+| Networking | Calico node agent |
+| Node management | Node-level system agents |
+
+### Example
+
+A company uses Fluent Bit to collect container logs from all Kubernetes nodes.
+
+Instead of deploying separate Pods manually, the company uses a DaemonSet.
+
+This ensures every eligible node runs a log collection agent.
+
+## 5. DaemonSet vs Deployment
+
+| Deployment | DaemonSet |
+|---|---|
+| Maintains a desired number of replicas | Runs Pods on eligible nodes |
+| Used for application workloads | Used for node-level services |
+| Pods are scheduled according to available resources and constraints | Pods are associated with eligible nodes |
+| Uses a replica count | Does not require a replica count |
+
+**Important:** DaemonSet is not an old version of Deployment. Both are separate Kubernetes controllers with different purposes.
+
+---
+
+# 🧪 PART 5: DAEMONSET PRACTICAL
+
+## Objective
+
+Deploy a container application using a DaemonSet.
+
+### Step 1: Check Cluster Nodes
+
+```bash
+kubectl get nodes
+```
+
+Example:
+
+```text
+NAME       STATUS   ROLES
+worker-1   Ready    worker
+worker-2   Ready    worker
+```
+
+### Step 2: Create DaemonSet YAML
+
+Create:
+
+```bash
+vi daemon.yml
+```
+
+Add:
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: mb-daemon
+  labels:
+    app: bank
+spec:
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+        - name: cont1
+          image: trainerreyaz/mb-image:latest
+```
+
+### YAML Explanation
+
+- `apiVersion: apps/v1` – Kubernetes API version.
+- `kind: DaemonSet` – Creates a DaemonSet.
+- `metadata` – Defines the resource name and labels.
+- `selector` – Identifies Pods managed by the DaemonSet.
+- `template` – Defines the Pod configuration.
+- `containers` – Defines the container to run.
+- `image` – Specifies the container image.
+
+The DaemonSet does not need a `replicas` field.
+
+### Step 3: Create DaemonSet
+
+```bash
+kubectl apply -f daemon.yml
+```
+
+### Step 4: Verify DaemonSet
+
+```bash
+kubectl get daemonsets
+```
+
+Short command:
+
+```bash
+kubectl get ds
+```
+
+### Step 5: Check Pods
+
+```bash
+kubectl get pods -o wide
+```
+
+This shows the nodes on which the Pods are running.
+
+For example, if two worker nodes are eligible, the DaemonSet normally schedules one Pod on each worker node.
+
+### Step 6: Describe DaemonSet
+
+```bash
+kubectl describe daemonset mb-daemon
+```
+
+### Step 7: Check DaemonSet in a Namespace
+
+```bash
+kubectl get daemonsets -n default
+```
+
+### Step 8: Delete DaemonSet
+
+```bash
+kubectl delete daemonset mb-daemon -n default
+```
+
+### Step 9: Delete All DaemonSets in a Namespace
+
+```bash
+kubectl delete daemonsets --all -n default
+```
+
+**Warning:** This command deletes every DaemonSet in the selected namespace. Use it carefully.
+
+## 6. Important DaemonSet Commands
+
+| Command | Purpose |
+|---|---|
+| `kubectl get ds` | List DaemonSets |
+| `kubectl get ds -A` | List DaemonSets in all namespaces |
+| `kubectl describe ds mb-daemon` | Show DaemonSet details |
+| `kubectl get pods -o wide` | Show Pods and assigned nodes |
+| `kubectl rollout status ds/mb-daemon` | Check rollout status |
+| `kubectl delete ds mb-daemon` | Delete DaemonSet |
+
+## 7. DaemonSet Best Practices
+
+1. Use DaemonSets for node-level workloads.
+2. Configure resource requests and limits.
+3. Use node selectors or node affinity when needed.
+4. Configure tolerations carefully.
+5. Use trusted and versioned container images.
+6. Monitor DaemonSet health.
+7. Apply appropriate security contexts.
+8. Avoid unnecessary privileged containers.
+9. Use rolling updates to reduce disruption.
+10. Remember that taints, tolerations, and node eligibility affect scheduling.
+
+## 8. DaemonSet Interview Questions
+
+**Q1. What is a DaemonSet?**
+
+A DaemonSet is a Kubernetes controller that ensures a Pod runs on every eligible or selected node.
+
+**Q2. Why is DaemonSet used?**
+
+It is used for node-level services such as monitoring, logging, networking, and security.
+
+**Q3. What happens when a new node joins the cluster?**
+
+The DaemonSet controller automatically creates a Pod on the new node if it is eligible.
+
+**Q4. Does DaemonSet require replicas?**
+
+No. DaemonSet manages Pods based on eligible nodes rather than a specified replica count.
+
+**Q5. What is the difference between Deployment and DaemonSet?**
+
+Deployment maintains a desired number of application replicas, while DaemonSet runs Pods across eligible nodes.
+
+**Q6. Can DaemonSet run only on selected nodes?**
+
+Yes. You can use node selectors or node affinity.
+
+**Q7. Is DaemonSet used for monitoring?**
+
+Yes. Node Exporter is a common example.
+
+**Q8. Can a DaemonSet run on control-plane nodes?**
+
+Yes, if node scheduling rules, taints, and tolerations allow it.
+
+**Q9. How do you verify a DaemonSet?**
+
+```bash
+kubectl get ds
+kubectl get pods -o wide
+```
+
+**Q10. What happens when a DaemonSet is deleted?**
+
+By default, Kubernetes deletes the Pods managed by that DaemonSet.
+
+---
+
+# 📊 Final Comparison: RBAC vs DaemonSet
+
+| RBAC | DaemonSet |
+|---|---|
+| Kubernetes authorization mechanism | Kubernetes workload controller |
+| Manages permissions | Manages Pods on nodes |
+| Controls resource access | Ensures node-level workloads run |
+| Uses Roles and Bindings | Uses DaemonSet manifests |
+| Improves security | Supports node-level operations |
+
+# 🎯 Key Takeaways
+
+### RBAC
+
+- RBAC controls who can perform actions on Kubernetes resources.
+- Roles and RoleBindings manage namespace permissions.
+- ClusterRoles and ClusterRoleBindings support cluster-wide access.
+- ServiceAccounts provide identities for applications.
+- Always follow least privilege.
+
+### DaemonSet
+
+- DaemonSet runs Pods on every eligible or selected node.
+- It is commonly used for logging, monitoring, networking, and security.
+- It automatically handles newly added eligible nodes.
+- It does not use a replicas field.
+- It is different from a Deployment.
+
+---
+
+# 🛠️ Technologies Covered
+
+- Kubernetes
+- kubectl
+- YAML
+- RBAC
+- ServiceAccounts
+- Roles and RoleBindings
+- ClusterRoles and ClusterRoleBindings
+- DaemonSets
+- Kubernetes Security
+- Kubernetes Workload Management
+
+---
+
+## 📚 Conclusion
+
+RBAC and DaemonSet are important Kubernetes concepts for DevOps and Cloud Engineers.
+
+**RBAC** helps secure Kubernetes clusters by controlling user and application permissions.
+
+**DaemonSet** helps run and manage node-level services across Kubernetes nodes.
+
+Understanding these concepts is useful for real-world Kubernetes administration, security, monitoring, and DevOps interviews.
+
+---
+
+⭐ If you find these notes helpful, consider starring the repository.
+
+**#Kubernetes #DevOps #CloudComputing #RBAC #DaemonSet #KubernetesSecurity #LearningDevOps**
