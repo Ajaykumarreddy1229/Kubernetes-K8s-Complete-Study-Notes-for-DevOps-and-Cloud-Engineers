@@ -1,0 +1,869 @@
+# Kubernetes Complete Notes: Static Pods, Services & Health Probes
+
+Detailed learning notes with explanations, Kubernetes commands, YAML manifests, practical labs, troubleshooting, and interview preparation.
+
+> **Note:** These notes are based on my study material. Lab examples require a configured Kubernetes cluster. Replace placeholder values with your own infrastructure details, and never commit private keys or credentials to GitHub. Service exposure and cloud behavior depend on the cluster configuration.
+
+## Table of Contents
+
+1. [Static Pods](#1-what-are-static-pods)
+2. [Kubernetes Services](#2-kubernetes-services)
+3. [Kubernetes Health Probes](#3-kubernetes-health-probes)
+
+---
+
+## 1. What Are Static Pods?
+
+ A Static Pod is a Pod managed directly by the Kubelet on a node — not by the API server or control plane.
+
+ Control plane components are usually Static Pods
+### Why Kubernetes Uses Static Pods
+ Because API Server itself may not be available initially.
+
+ So kubelet directly starts:
+
+ API server
+ etcd
+ scheduler
+
+ without depending on Kubernetes API. This is called: Self-hosted bootstrap
+
+
+ They are usually used for:
+
+ Bootstrapping control plane components (like kube-apiserver, etcd, etc.)
+
+ Running critical node-level services that must always exist
+
+ The Kubelet watches a directory for static pod manifests: /etc/kubernetes/manifests/
+
+ Any YAML file you put here → Kubelet automatically creates that Pod.
+### Mirror Pod Concept
+ When a static pod runs, Kubelet creates a “mirror pod” entry in the API server so you can see it with kubectl. API server gets a read-only copy
+ But that mirror pod cannot be edited or deleted — it’s read-only.
+
+
+ Manifest  File in worker node
+       ↓
+ /etc/kubernetes/manifests
+       ↓
+ Kubelet Watches Folder
+       ↓
+ Creates Static Pod
+       ↓
+ Mirror Pod appears in API Server
+### Static Pod Flow
+ 1️⃣ You drop a YAML file in /etc/kubernetes/manifests/
+ 2️⃣ Kubelet detects the file → creates the Pod directly
+ 3️⃣ Kubelet requests a “mirror pod” in the API server for visibility
+ 4️⃣ If you delete the mirror pod → static pod keeps running
+### Static Pods vs Normal Pods
+
+ | Feature        | Static Pod                                       | Normal Pod                       |
+ | -------------- | ------------------------------------------------ | -------------------------------- |
+ | Managed by     | **Kubelet** directly                             | **Kube-API Server**              |
+ | Created via    | YAML file on node (`/etc/kubernetes/manifests/`) | `kubectl create`                  |
+ | Scheduler      | Not scheduled — runs **on that node only**       | Scheduled by **kube-scheduler**  |
+ | Replication    | No ReplicaSet or Deployment                      | Managed by ReplicaSet/Deployment |
+ | API Visibility | Shows in `kubectl get pods` (via mirror pod)     | Fully managed by API             |
+ | Use case       | System components, node-local apps               | User workloads                   |
+
+### Static Pod Hands-On Lab
+ Login to the worker node --> AWS COnsole --> select worker node --> connect --> ssh client
+
+ Duplicate a new session tab from kops machine in mobaxterm
+
+ssh -i "<your-private-key>.pem" ubuntu@<your-worker-node-public-dns>  # Replace placeholders; never upload your private key
+
+ sudo -s
+
+ cd /etc/kubernetes/manifests/
+
+ vi static-nginx.yml
+
+```yaml
+ apiVersion: v1
+ kind: Pod
+ metadata:
+   name: static-nginx
+ spec:
+   containers:
+   - name: nginx
+     image: nginx:latest
+     resources:
+       requests:
+         cpu: "100m"
+         memory: "128Mi"
+       limits:
+         cpu: "200m"
+         memory: "256Mi"
+```
+
+
+ No need to do any kubectl create --> because if you just put any manifest file, kubelet will create this automatically
+
+ If you want to see this in control plane, go back to kops machine, it will create a mirror pod
+
+ kubectl get pods
+
+ kubectl delete pod static-nginx-<nodeName>
+
+ It will automatically create a pod again as manifest file is in node , if you want to delete go to node and remove manifest file
+
+ cd /etc/kubernetes/manifests/
+ rm static-nginx.yml
+### Verify Control Plane Static Pods
+ In control plane also we have static pods, where it is not created using api-server
+
+ kubectl get pods -n kube-system -o wide
+
+
+
+ Can you create static pods using kubectl?
+
+ ❌ NO
+
+ Need to place YAML directly on node filesystem.
+
+ “Static Pods are directly managed by kubelet using manifest files stored locally on the node. They are commonly used for Kubernetes control-plane components like API server and etcd.”
+### Troubleshooting Static Pods
+ journalctl -u kubelet -f
+### Does the Control Plane Have Kubelet and Static Pods?
+ YES
+
+ Why control plane has kubelet
+ Control plane nodes run components like:
+
+ API Server
+ Scheduler
+ Controller Manager
+ etcd
+
+ But in many setups, especially:
+
+ kubeadm clusters
+ kOps clusters
+ EKS-managed nodes (conceptually similar)
+
+ 👉 control plane is also a node in the cluster
+
+ So it still needs a kubelet to:
+
+ communicate with the API server
+ manage static pods
+ keep control-plane pods running
+
+
+
+ Setup KOPS on Amazon Linux 2 machine with t2.micro
+
+
+## 2. Kubernetes Services
+
+ Services allow you to expose your applications running on Pods to other components within the cluster or to external users.
+
+ Services provide a stable IP address and DNS name for the set of Pods, which might change over time due to scaling or updates
+### Kubernetes Service Types
+#### ClusterIP
+
+ This is the default type of Service. It exposes the Service on a cluster-internal IP. Other services within the same Kubernetes cluster can access the Service, but it is not accessible from outside the cluster.
+
+ This creates a connection using an internal Cluster IP address and a Port.
+#### NodePort
+
+ This type of Service exposes the Service on each Node’s IP at a static port. A NodePort Service is accessible from outside the cluster by hitting the <NodeIP>:<NodePort>.
+
+ When a NodePort is created, kube-proxy exposes a port in the range 30000-32767:
+
+ Why the range?
+ Reduce accidental conflicts: Keeping NodePorts in a dedicated high-numbered range makes it less likely that a NodePort collides with an existing service on the node.
+
+ TargetPort:
+
+ Pod Container port. Pod's container listens on applicationn port Ex: 80 or 8080, if omitted, targetPort defaults to the Service port
+#### LoadBalancer
+
+ This Service type exposes the Service externally using a cloud provider’s load balancer. It is typically used in cloud environments like AWS, GCP, or Azure.
+
+ A LoadBalancer is a Kubernetes service that:
+
+ Creates a service like ClusterIP
+ Opens a port in every node like NodePort
+ Uses a LoadBalancer implementation from your cloud provider (your cloud provider needs to support this for LoadBalancers to work).
+
+
+
+ -- kops get cluster
+
+ -- kubectl get nodes
+
+ -- kubectl get events  [This command is used to see all the cluster events]
+
+ -- kubectl get svc   [By default kuberenets will create a default svc ]
+
+ Let us create a new service
+
+ vi service.yml
+
+```yaml
+ apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+   name: ib-deployment
+   labels:
+     app: bank
+ spec:
+   replicas: 3
+   selector:
+     matchLabels:
+       app: bank
+   template:
+     metadata:
+       labels:
+         app: bank
+     spec:
+       containers:
+       - name: cont1
+         image: trainerreyaz/ib-image:latest
+ ---
+ apiVersion: v1
+ kind: Service
+ metadata:
+   name: ib-service
+ spec:
+   type: ClusterIP
+   selector:
+     app: bank
+   ports:
+     - port: 80        # Exposes the service on port 80
+       targetPort: 80  #  Pod's container listens on 80, if omitted, targetPort defaults to the Service port
+```
+### How Service Traffic Flows
+ Client connects to ib-service:80
+ Service forwards request to the Pod’s container at 8080 if 80 (because targetPort: 8080 / 80)
+ The container in the Pod listens on 8080 / 80 and processes the request.
+
+ targetport = Pod's container
+ nodeport = Node's external port
+
+
+ -- kubectl create -f service.yml    [To create deployment]
+
+ -- kubectl get pods  [To get the list of the pods]
+
+ -- kubectl get svc   [Get the list of services created]
+
+ -- kubectl get pods -o wide  [Get the pods details ]
+
+ -- kubectl describe svc ib-service  [Get the detailed description of service]
+
+ ===== This has clusterIP service, but  cannot exposed to internet, use this for databases which should be in private
+
+ -- kubectl delete -f service.yml    [ This will delete service and deployment ]
+
+
+
+ NodePort
+
+ IT will expose our application in a particular port
+
+Security note: Allow only the required application port from trusted source IPs in the AWS security group; do not allow all traffic.
+
+ if we don't specify any port K8s will pick randomly
+
+
+ vi service.yml
+
+```yaml
+ apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+   name: mb-deployment
+   labels:
+     app: bank
+ spec:
+   replicas: 3
+   selector:
+     matchLabels:
+       app: bank
+   template:
+     metadata:
+       labels:
+         app: bank
+     spec:
+       containers:
+       - name: cont1
+         image: trainerreyaz/mb-image:latest
+ ---
+ apiVersion: v1
+ kind: Service
+ metadata:
+   name: mb-service
+ spec:
+   type: NodePort   # Type Nodeport, but if you dont mention port number under ports section, K8s will assign random port
+   selector:
+     app: bank
+   ports:
+     - port: 80
+       targetPort: 80  # Ensure this matches the container's port, if omitted, targetPort defaults to the Service port
+```
+
+
+ -- kubectl apply -f service.yml  [Can use create to create new resources , update is used to update on existing resources]
+
+ -- kubectl describe svc mb-service
+
+ -- kubectl get svc  [ See the output, it shows nodeport, port number is random ]
+
+Security note: Allow only the required application port from trusted source IPs in the AWS security group; do not allow all traffic.
+     Custom TCP = 31433 , custom=anywhere
+Security note: Allow only the required application port from trusted source IPs in the AWS security group; do not allow all traffic.
+
+ ==== if you want your own customized port , just edit the before file
+
+ vi service.yml
+
+
+```yaml
+ apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+   name: mb-deployment
+   labels:
+     app: bank
+ spec:
+   replicas: 3
+   selector:
+     matchLabels:
+       app: bank
+   template:
+     metadata:
+       labels:
+         app: bank
+     spec:
+       containers:
+       - name: cont1
+         image: reyadocker/mobilebankingrepo:latest
+ ---
+ apiVersion: v1
+ kind: Service
+ metadata:
+   name: mb-service
+ spec:
+   type: NodePort
+   selector:
+     app: bank
+   ports:
+     - port: 80
+       targetPort: 80  # Ensure this matches the container's port, if omitted, targetPort defaults to the Service port
+       nodePort: 31433  # External access via <NodeIP>:31234 Must be in range 30000-32767
+```
+
+
+ Client accesses http\://<NodeIP>:31234
+ Traffic reaches Kubernetes Node on nodePort: 31433
+ The service forwards it to port: 80 (internal Service port)
+ Then it forwards the request to targetPort: 80 (inside the Pod’s container)
+
+
+ -- kubectl apply -f service.yml   [ we can update existing deployment ]
+
+ create vs apply : create will create new resources, apply for updating existing resources
+
+ -- kubectl describe svc mb-service
+
+ -- kubectl get svc
+
+ [http://IP:31433](http://ip:31433/)
+
+
+ Drawback of nodeport : we should not give IP and port number to customer, he is not interested
+
+ LoadBalancer - it will expose our app to customer using URL, map in R53
+
+ first delete the deployment
+
+ -- kubectl delete -f service.yml
+
+
+ vi service.yml
+
+```yaml
+ apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+   name: insurance-deployment
+   labels:
+     app: bank
+ spec:
+   replicas: 3
+   selector:
+     matchLabels:
+       app: bank
+   template:
+     metadata:
+       labels:
+         app: bank
+     spec:
+       containers:
+       - name: cont1
+         image: trainerreyaz/insurance-image:latest
+ ---
+ apiVersion: v1
+ kind: Service
+ metadata:
+   name: mb-service
+ spec:
+   type: LoadBalancer
+   selector:
+     app: bank
+   ports:
+     - port: 80
+       targetPort: 80  # Ensure this matches the container's port, if omitted, targetPort defaults to the Service port
+       nodePort: 31433 # If you dont mention target and nodeports, K8s will generate random nodeport and target port 80
+```
+
+
+ -- kubectl create -f service.yml
+
+ -- kubectl describe svc mb-service
+
+ -- kubectl get svc  [Grab the elb, and see in AWS Console : ELB, Target Group. Wait for sometime to come InService]
+
+ -- kubectl delete -f service.yml [if required]
+
+
+
+ User/Pod
+    ↓
+ Service
+    ↓
+ kube-proxy
+    ↓
+ Pod
+
+ Service acts like: Load Balancer inside Kubernetes, It forwards traffic to healthy pods.
+
+
+ Request
+    ↓
+ Service DNS
+    ↓
+ ClusterIP
+    ↓
+ kube-proxy
+    ↓
+ iptables/IPVS
+    ↓
+ Pod IP/Healthy Pod
+### How Services Find Pods
+ Selectors + Labels
+
+ Does Service directly connect to Deployment?
+ NO, Service connects to: POD based on Selector and Labels
+
+ What component manages service networking?
+ kube-proxy
+ Creates: iptables and IPVS rules
+
+ | Type         | Internal | External |
+ | ------------ | -------- | -------- |
+ | ClusterIP    | ✅        | ❌        |
+ | NodePort     | ✅        | ✅        |
+ | LoadBalancer | ✅        | ✅        |
+
+
+ Why do we need Services when pods already have IPs?
+ ✅ Answer
+
+ Pod IPs are:
+ ❌ temporary
+ ❌ dynamic
+
+ When pods restart: IP changes
+ Service provides:
+ ✅ stable virtual IP
+ ✅ stable DNS
+
+ Difference between iptables and IPVS(IP virtual Server) mode?
+ | iptables        | IPVS               |
+ | --------------- | ------------------ |
+ | Rule-based      | Hash-table based   |
+ | Slower at scale | Faster             |
+ | Older           | Better performance |
+
+ What are Endpoints in Kubernetes?
+ Answer : Endpoints contain: Actual backend pod IPs
+ kubectl get endpoints
+
+ What happens internally when Service is created?
+ ✅ Answer
+ Service gets ClusterIP
+ Selector finds matching pods
+ Endpoints created
+ kube-proxy creates networking rules
+ Traffic routed to healthy pods
+
+
+ How does Service perform load balancing?
+ ✅ Answer
+
+ Service distributes traffic across backend pods using:
+
+ iptables
+ OR
+ IPVS
+
+ Usually round-robin style balancing.
+
+ What happens if a pod crashes?
+ ✅ Answer
+
+ Endpoint automatically removed.
+
+ Service sends traffic only to healthy pods.
+
+ What is session affinity?
+ ✅ Answer
+
+ Ensures client always reaches same pod.
+
+ Example: sessionAffinity: ClientIP
+
+ Can multiple Services point to same pods?
+ ✅ Answer
+
+ ✅ YES
+
+ Different services can use same selectors.
+
+
+
+## 3. Kubernetes Health Probes
+ Health Probes are Kubernetes mechanisms that allow the kubelet to determine whether a container/pod is healthy, ready to receive traffic, or has started successfully.
+
+
+ Health Probes are used by Kubernetes to check: Is application healthy and ready?
+
+ Sometimes container is running BUT application inside failed
+
+ Without probes: ❌ Kubernetes thinks pod is healthy
+
+
+ Health probes are how Kubernetes checks if your containers are healthy and ready to serve traffic.
+ They help Kubernetes decide:
+
+ 🚦 When to start sending traffic to a container
+
+ 🧹 When to restart a container that’s unhealthy
+
+ 3 Types
+
+ | Probe               | Purpose                                    | What Kubernetes does if it fails                         |
+ | ------------------- | ------------------------------------------ | -------------------------------------------------------- |
+ | **Startup Probe**   | Has the application finished starting?     | Delays liveness/readiness checks until startup completes |
+ | **Readiness Probe** | Is the application ready to serve traffic? | Removes the Pod from Service endpoints                   |
+ | **Liveness Probe**  | Is the application still alive?            | Restarts the container                                   |
+
+
+
+
+
+
+ | Probe           | Purpose
+ | --------------- | -----------------------------
+ | Startup Probe   | Has app started successfully? used for slow starting applications
+ | Readiness Probe | Ready to accept traffic?  / Can app receive traffic?, if probe fails, Pod NOT restarted instead remove from service
+                                                 endpoint. No traffic sent, it will stop traffic
+ | Liveness Probe  | Is app alive? / Is application still alive? if probe fails, k8s restarts container
+### Types of Health Probes
+
+ livenessProbe:
+ Checks if the app is alive. If it fails → pod is restarted.
+
+ Example: App is hung or deadlocked or application gets stuck in an infinite loop. A liveness probe detects this.
+
+ Probe fails
+    ↓
+ kubelet detects
+    ↓
+ Container restarted
+
+
+ readinessProbe:
+ ---------------.
+ A readiness probe determines whether a Pod should receive traffic.
+
+ Checks If the POD is ready to serve requests. If it fails → pod removed from service endpoints.
+ Example:  App still starting up or warming cache.
+
+ Probe fails
+    ↓
+ Pod removed from endpoints
+    ↓
+ No traffic routed
+
+
+ startupProbe:
+ Some applications take a long time to start.
+
+ Used For slow-starting apps. Checks if the app has *started successfully* before liveness/readiness begin.
+ Example: Large Java app booting slowly.
+
+ Some applications take a long time to start.
+
+ For example: MySQL , Elasticsearch, Kafka
+
+ Suppose MySQL needs 60 seconds to initialize.
+
+ Without a startup probe:
+
+ 0 sec   Container starts
+
+ 10 sec  Liveness Probe
+          FAIL
+
+ 20 sec  FAIL
+
+ 30 sec  FAIL
+
+ Container restarted
+
+ It never gets enough time to finish starting.
+
+ A startup probe solves this.
+
+ Container starts
+       |
+ Startup Probe
+       |
+       X
+       X
+       X
+       ✓
+       |
+ Enable Liveness Probe
+
+ Only after the startup probe succeeds do the liveness and readiness probes begin.
+### How Kubernetes Performs Probes
+ You can define probes in 3 ways:
+
+ HTTP Probe: Calls a specific HTTP endpoint and checks for a 200–399 status code. Example: /health, /status
+ TCP Probe: Checks if a TCP socket is open on a port. Example: Useful for non-HTTP apps.
+ Exec Probe: Runs a command inside the container; success if exit code = 0. Example: e.g., pgrep nginx
+
+ | Parameter             | Meaning                                                                      |
+ | --------------------- | ---------------------------------------------------------------------------- |
+ | `initialDelaySeconds` | Wait before the first probe after the container starts                       |
+ | `periodSeconds`       | How often to run the probe                                                   |
+ | `timeoutSeconds`      | How long to wait for a response before considering the probe failed          |
+ | `failureThreshold`    | Number of consecutive failures before taking action                          |
+ | `successThreshold`    | Number of consecutive successes required (mainly used with readiness probes) |
+
+
+ Startup Probe: Gives slow-starting applications enough time to initialize.
+ Liveness Probe: Restarts the container if it becomes unhealthy or hangs.
+ Readiness Probe: Ensures only healthy, ready Pods receive traffic from Services.
+
+
+ Visual Flow
+        ┌─────────────────────────────┐
+        │ Container starts            │       |
+        └────────────┬────────────────┘
+                         |
+                  startupProbe runs
+                          │
+      ┌──────────────┴──────────────┐
+      │ Success                     │ Fail
+      ▼                             ▼
+ readinessProbe starts       Restart container
+        │
+        ▼
+ livenessProbe keeps checking health
+### Example: All Three Probes in One Pod
+
+```yaml
+ apiVersion: v1
+ kind: Pod
+ metadata:
+   name: probe-demo
+ spec:
+   containers:
+   - name: web
+     image: nginx
+     ports:
+     - containerPort: 80
+```
+
+     #1️⃣ Startup Probe (wait for app to boot)
+     startupProbe:
+       httpGet:
+         path: /
+         port: 80
+       failureThreshold: 30  # Try for ~5 min
+       periodSeconds: 10
+
+     # 2️⃣ Liveness Probe (restart if dead)
+     livenessProbe:
+       httpGet:
+         path: /
+         port: 80
+       initialDelaySeconds: 30
+       periodSeconds: 10
+       failureThreshold: 3
+
+     # 3️⃣ Readiness Probe (only send traffic when ready)
+     readinessProbe:
+       httpGet:
+         path: /
+         port: 80
+       initialDelaySeconds: 10
+       periodSeconds: 5
+       failureThreshold: 3
+
+
+
+ initialDelaySeconds 30: Kubernetes waits 30 seconds after the container starts before checking health. Time Kubernetes waits before first probe
+ periodSeconds 10 : Kubernetes checks the health every 10 seconds.How often probe runs.
+ failureThreshold 3 : If the probe fails 3 times in a row, Kubernetes takes action.
+### Demo: Liveness Probe Failure and Auto-Restart
+
+ We’ll create a simple container that:
+
+ Starts an HTTP server
+
+ Then “breaks” after 30 seconds
+
+ Kubernetes will detect this via livenessProbe and restart it 💡
+
+ vi liveness-demo.yml
+
+```yaml
+ apiVersion: v1
+ kind: Pod
+ metadata:
+   name: liveness-demo
+ spec:
+   containers:
+   - name: liveness-demo
+     image: busybox
+     args:
+       - /bin/sh
+       - -c
+       - |
+         echo "Starting server...";
+         # Create dummy health endpoint
+         (while true; do
+           echo -e "HTTP/1.1 200 OK\n\nOK" | nc -l -p 8080 -q 1;
+         done) &
+         sleep 30; # after 30 seconds, stop the server
+         echo "Simulating crash..."
+         pkill nc;
+         sleep 3600;
+```
+
+     livenessProbe:
+       httpGet:
+         path: /
+         port: 8080
+       initialDelaySeconds: 5
+       periodSeconds: 5
+       failureThreshold: 2
+
+ Script Explanation:
+ Starts a background process (notice the & at the end).
+ The while true loop runs forever — unless stopped.
+ Uses nc (netcat) to open a simple TCP server on port 8080.
+ When a client connects, it sends  HTTP/1.1 200 OK
+ and closes the connection (-q 1 means quit 1 second after EOF)
+ pkill nc: This kills the netcat (nc) process, which means your HTTP server stops running.
+
+ kubectl apply -f liveness-demo.yml
+
+ kubectl get pods
+
+ After ~50 seconds:
+
+ kubectl get pods
+
+ Kubernetes detected the container crash and restarted it automatically.
+
+ kubectl describe pod liveness-demo
+
+ kubectl delete pod liveness-demo
+### Real-World Example: Deployment with All Probes
+
+ vi allprobes.yml
+
+```yaml
+ apiVersion: apps/v1
+ kind: Deployment
+ metadata:
+   name: insurance-deployment
+   labels:
+     app: bank
+ spec:
+   replicas: 3
+   selector:
+     matchLabels:
+       app: bank
+   template:
+     metadata:
+       labels:
+         app: bank
+     spec:
+       containers:
+       - name: cont1
+         image: trainerreyaz/insurance-image:latest
+         ports:
+           - containerPort: 80
+```
+
+         # Health Probes
+         livenessProbe:
+           httpGet:
+             path: /
+             port: 80
+           initialDelaySeconds: 15   # Wait 15s before first check
+           periodSeconds: 10         # Check every 10s
+           failureThreshold: 3       # Restart after 3 failed checks
+
+         readinessProbe:
+           httpGet:
+             path: /
+             port: 80
+           initialDelaySeconds: 5    # Start checking after 5s
+           periodSeconds: 5          # Check every 5s
+           failureThreshold: 2       # Mark unready after 2 failed checks
+
+         startupProbe:
+           httpGet:
+             path: /
+             port: 80
+           failureThreshold: 30      # Give app up to 30 failures
+           periodSeconds: 10         # before considering startup failed
+
+ ---
+```yaml
+ apiVersion: v1
+ kind: Service
+ metadata:
+   name: insurance-service
+ spec:
+   type: LoadBalancer
+   selector:
+     app: bank
+   ports:
+     - port: 80
+       targetPort: 80
+       nodePort: 31433
+```
+
+
+ kubectl apply -f allprobes.yml
+
+ kubectl get pods
+
+ kubectl get service   [see the load balancer]
+
+ kubectl delete -f allprobes.yml
