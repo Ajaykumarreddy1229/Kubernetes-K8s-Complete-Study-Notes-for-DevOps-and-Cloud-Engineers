@@ -1,0 +1,314 @@
+# Setting Up HTTPS for a Kubernetes Application Using AWS ACM and ALB
+
+## Introduction
+
+In this hands-on Kubernetes project, we configure HTTPS for a containerized application using AWS Certificate Manager (ACM), AWS Application Load Balancer (ALB), Kubernetes Ingress, Helm, KOPS, and Amazon Route 53.
+
+The main goal is to make our application accessible through a custom domain name using a secure HTTPS connection.
+
+## Technologies Used
+
+- Kubernetes (K8s)
+- KOPS
+- AWS Certificate Manager (ACM)
+- AWS Application Load Balancer (ALB)
+- AWS Load Balancer Controller
+- Kubernetes Ingress
+- Amazon Route 53
+- Helm
+- Docker
+
+## Architecture
+
+User → Route 53 DNS → AWS Application Load Balancer (HTTPS:443) → Kubernetes NodePort Service → Application Pods
+
+The AWS ALB uses the ACM certificate to handle HTTPS connections. It forwards traffic to the Kubernetes application using the configured target group.
+
+## Step 1: Set Up the Kubernetes Cluster
+
+First, create a Kubernetes cluster using KOPS.
+
+Verify that the worker nodes are running:
+
+```bash
+kubectl get nodes
+```
+
+Make sure all required nodes show the Ready status.
+
+## Step 2: Create an SSL/TLS Certificate in AWS ACM
+
+1. Open the AWS Management Console.
+2. Search for AWS Certificate Manager.
+3. Select the Mumbai Region (ap-south-1).
+4. Request a public certificate.
+5. Enter the domain `*.ajayclouddevops.online`.
+6. Choose DNS validation.
+7. Create the required DNS validation records in Route 53.
+8. Wait until the certificate status becomes Issued.
+9. Copy the certificate ARN.
+
+The ACM certificate must be in the same AWS Region as the Application Load Balancer.
+
+## Step 3: Create Kubernetes Deployment and Service
+
+Create a file named `application-deploy-service.yml`.
+
+The Deployment creates three application replicas.
+
+The Service exposes the application internally through NodePort 31433.
+
+The Deployment also includes three health probes:
+
+- Liveness Probe: Checks whether the container is healthy and needs restarting.
+- Readiness Probe: Checks whether the container is ready to receive traffic.
+- Startup Probe: Allows the application time to start before normal health checks apply.
+
+Apply the configuration:
+
+```bash
+kubectl apply -f application-deploy-service.yml
+```
+
+Verify the resources:
+
+```bash
+kubectl get deployments
+kubectl get pods
+kubectl get svc
+```
+
+## Step 4: Configure AWS IAM Permissions
+
+The AWS Load Balancer Controller needs AWS IAM permissions to create and manage Application Load Balancers, target groups, and listeners.
+
+For a KOPS cluster, configure the controller's AWS credentials using an appropriate IAM role or supported pod identity mechanism.
+
+Use the official AWS Load Balancer Controller IAM policy with least-privilege permissions.
+
+Avoid attaching AdministratorAccess to worker nodes.
+
+## Step 5: Install Helm
+
+Helm is a package manager for Kubernetes.
+
+It helps install and manage Kubernetes applications using Helm charts.
+
+Install Helm:
+
+```bash
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+
+chmod 700 get_helm.sh
+
+./get_helm.sh
+```
+
+Verify:
+
+```bash
+helm version
+```
+
+## Step 6: Install AWS Load Balancer Controller
+
+Add the AWS EKS Helm chart repository:
+
+```bash
+helm repo add eks https://aws.github.io/eks-charts
+
+helm repo update
+```
+
+Install the AWS Load Balancer Controller using a service account configured with the required AWS permissions.
+
+Example installation:
+
+```bash
+helm install aws-load-balancer-controller \
+  eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=reyaz.k8s.local \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller
+```
+
+The referenced service account must already exist and be configured with suitable AWS permissions.
+
+For KOPS, confirm the controller's Kubernetes version compatibility, AWS credentials, VPC discovery, and networking requirements before installation.
+
+Check the controller:
+
+```bash
+kubectl get pods -n kube-system | grep aws-load-balancer
+```
+
+## Step 7: Understand Kubernetes Ingress
+
+An Ingress is a Kubernetes resource that defines how external HTTP and HTTPS traffic reaches applications inside a cluster.
+
+An Ingress Controller reads these rules and configures the actual traffic-routing infrastructure.
+
+### Why Do We Need an Ingress Controller?
+
+An Ingress Controller provides:
+
+- Host-based routing
+- Path-based routing
+- HTTPS termination
+- Traffic forwarding to Kubernetes Services
+- Centralized external access
+
+### Types of Ingress Controllers
+
+**NGINX Ingress Controller**
+
+Uses an NGINX proxy to route incoming application traffic.
+
+**AWS Load Balancer Controller**
+
+Creates and manages AWS Application Load Balancers for Kubernetes Ingress resources.
+
+In this project, we use the AWS Load Balancer Controller.
+
+### Real-World Example
+
+Think of Kubernetes as a gated community.
+
+- Pods are houses.
+- Services are streets connecting houses.
+- The Ingress Controller manages the entrance.
+- The Application Load Balancer receives visitors and directs them to the correct service.
+
+## Step 8: Create Kubernetes Ingress
+
+Create a file named `ingress.yml`.
+
+The Ingress configuration defines:
+
+- Internet-facing Application Load Balancer
+- Instance target type
+- HTTP listener on port 80
+- HTTPS listener on port 443
+- HTTP-to-HTTPS redirection
+- ACM certificate ARN
+- Health-check configuration
+- Host-based routing
+- Backend Kubernetes Service
+
+Apply:
+
+```bash
+kubectl apply -f ingress.yml
+```
+
+Verify:
+
+```bash
+kubectl get ingress
+```
+
+Check details:
+
+```bash
+kubectl describe ingress insurance-ingress
+```
+
+The controller creates an AWS Application Load Balancer based on the Ingress configuration.
+
+## Step 9: Configure Amazon Route 53
+
+1. Open Amazon Route 53.
+2. Select the hosted zone `ajayclouddevops.online`.
+3. Create a record for `k8s.ajayclouddevops.online`.
+4. Choose an A record with Alias enabled.
+5. Select the Application Load Balancer as the alias target.
+6. Save the DNS record.
+
+The domain will now resolve to the ALB.
+
+## Step 10: Verify HTTPS
+
+Open:
+
+`https://k8s.ajayclouddevops.online`
+
+If the DNS, certificate, ALB, target groups, security groups, and application are configured correctly, the application should open securely over HTTPS.
+
+Test with:
+
+```bash
+curl -I https://k8s.ajayclouddevops.online
+```
+
+Verify that HTTP redirects to HTTPS:
+
+```bash
+curl -I http://k8s.ajayclouddevops.online
+```
+
+## How HTTPS Works
+
+1. The user enters the application domain in a browser.
+2. Route 53 resolves the domain to the Application Load Balancer.
+3. The ALB accepts HTTPS connections on port 443.
+4. The ALB uses the ACM certificate for TLS.
+5. The ALB forwards traffic to the registered Kubernetes nodes on the NodePort.
+6. The Kubernetes Service routes requests to healthy application Pods.
+7. The application sends its response to the user.
+
+**Note:** HTTPS terminates at the ALB in this example. Traffic from the ALB to the application uses HTTP. End-to-end encryption requires additional configuration.
+
+## Important Troubleshooting Commands
+
+```bash
+kubectl get nodes
+
+kubectl get pods -o wide
+
+kubectl get deployments
+
+kubectl get svc
+
+kubectl get ingress
+
+kubectl describe ingress insurance-ingress
+
+kubectl logs -n kube-system deployment/aws-load-balancer-controller
+```
+
+If the application is not reachable, check:
+
+- ACM certificate status
+- Route 53 DNS record
+- ALB listener configuration
+- Target group health
+- Security group rules
+- Subnet discovery and tags
+- IAM permissions
+- Pod readiness
+- Service selectors and ports
+
+## Conclusion
+
+This project demonstrates how to expose a Kubernetes application securely using AWS ACM and an Application Load Balancer.
+
+Through this hands-on implementation, we learn how Kubernetes Ingress, AWS Load Balancer Controller, Route 53, ACM certificates, and Kubernetes Services work together.
+
+The result is an application accessible through a custom domain with HTTPS enabled.
+
+## Key Learning Outcomes
+
+- Kubernetes Deployment and Services
+- NodePort networking
+- Kubernetes health probes
+- AWS Certificate Manager
+- AWS Load Balancer Controller
+- Kubernetes Ingress
+- Helm installation
+- IAM permissions
+- Route 53 DNS management
+- HTTPS configuration
+- HTTP-to-HTTPS redirection
+
+**Learning Journey: DevOps | AWS | Kubernetes | Cloud Engineering**
