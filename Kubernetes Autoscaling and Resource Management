@@ -1,0 +1,1568 @@
+# Kubernetes Autoscaling and Resource Management
+
+## Overview
+
+Kubernetes provides different mechanisms to monitor resource usage, automatically scale applications, and manage resource consumption inside a cluster.
+
+In this documentation, we will learn:
+
+1. Kubernetes Metrics Server
+2. Horizontal Pod Autoscaler (HPA)
+3. Vertical Pod Autoscaler (VPA)
+4. KEDA (Kubernetes Event-Driven Autoscaler)
+5. KEDA Cron Scaling
+6. HPA Scaling Stabilization
+7. Resource Quota
+8. Practical Hands-on Labs
+9. Important Kubernetes Autoscaling Interview Questions
+
+---
+
+# 1. Kubernetes Metrics Server
+
+## What is Metrics Server?
+
+Metrics Server is a scalable and efficient component used to collect CPU and memory usage information from Kubernetes nodes and pods.
+
+It provides resource metrics required by Kubernetes features such as:
+
+- Horizontal Pod Autoscaler (HPA)
+- Kubernetes Dashboard
+
+## Key Features
+
+### Resource Metrics
+- Collects CPU and memory usage from kubelets.
+- Provides metrics at node and pod levels.
+
+### Autoscaling
+- Helps HPA automatically increase or decrease pod replicas based on CPU or memory utilization.
+
+### Kubernetes Dashboard
+- Provides resource usage data displayed in the Kubernetes Dashboard.
+
+## How Metrics Server Works
+
+1. Each Kubernetes node runs a kubelet.
+2. Kubelet collects resource usage statistics.
+3. Metrics Server collects metrics from kubelets.
+4. Metrics Server makes the metrics available to Kubernetes components like HPA.
+
+## Important Commands
+
+Check pod metrics:
+
+```bash
+kubectl top pods
+```
+
+Check node metrics:
+
+```bash
+kubectl top nodes
+```
+
+Install Metrics Server:
+
+```bash
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml
+```
+
+Wait for approximately 2 minutes and check:
+
+```bash
+kubectl get pods -n kube-system
+kubectl top pods
+kubectl top nodes
+```
+
+**Note:** Without a working Metrics Server, CPU and memory metrics may not be available through `kubectl top`.
+
+---
+
+# 2. Kubernetes Autoscaling
+
+Kubernetes supports different types of autoscaling.
+
+## Types of Autoscaling
+
+### HPA – Horizontal Pod Autoscaler
+
+HPA automatically increases or decreases the number of pod replicas based on CPU, memory, or other supported metrics.
+
+Example:
+
+- CPU usage is above 70% → Scale Out.
+- CPU usage decreases → Scale In.
+
+### VPA – Vertical Pod Autoscaler
+
+VPA automatically adjusts CPU and memory resource requests for containers based on their actual usage and recommendations.
+
+Example:
+
+- Application requires more CPU → Increase CPU request.
+- Application requires less memory → Reduce memory request.
+
+**Difference:**
+
+- HPA → Increases or decreases the number of pods.
+- VPA → Adjusts resources allocated to pods.
+
+---
+
+# 3. Horizontal Pod Autoscaler (HPA)
+
+## What is HPA?
+
+Horizontal Pod Autoscaler automatically updates a workload, such as a Deployment or ReplicaSet, based on observed resource utilization.
+
+HPA helps applications handle changing traffic automatically.
+
+## Important Terms
+
+- Scale Out: Increasing the number of pods.
+- Scale In: Decreasing the number of pods.
+- Minimum Replicas: Minimum number of pods.
+- Maximum Replicas: Maximum number of pods.
+- Stabilization Window: Helps prevent frequent scaling changes.
+
+## Practical Lab: HPA Using Command Line
+
+### Step 1: Create a Deployment
+
+Create a file:
+
+```bash
+vi auto.yml
+```
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mb-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/mobilebankingrepo:latest
+```
+
+Create the deployment:
+
+```bash
+kubectl create -f auto.yml
+```
+
+Check pods:
+
+```bash
+kubectl get pods
+```
+
+### Step 2: Check Pod Metrics
+
+```bash
+kubectl top pods
+```
+
+### Step 3: Enable Autoscaling
+
+```bash
+kubectl autoscale deployment mb-deployment --cpu=20 --min=1 --max=10
+```
+
+Meaning:
+
+- Deployment: mb-deployment
+- CPU Target: 20%
+- Minimum Pods: 1
+- Maximum Pods: 10
+
+Check HPA:
+
+```bash
+kubectl get hpa
+```
+
+### Step 4: Generate CPU Load
+
+Connect to a pod:
+
+```bash
+kubectl get pods
+kubectl exec -it <pod-name> -- /bin/bash
+```
+
+Install stress:
+
+```bash
+apt update
+apt install stress
+```
+
+Generate CPU and memory load:
+
+```bash
+stress --cpu 8 --io 4 --vm 2 --vm-bytes 128M --timeout 60s
+```
+
+Another command:
+
+```bash
+stress --cpu 2 --timeout 60
+```
+
+### Step 5: Monitor Autoscaling
+
+Open another terminal:
+
+```bash
+kubectl get pods --watch
+```
+
+Check resource usage:
+
+```bash
+kubectl top pods
+```
+
+Check HPA:
+
+```bash
+kubectl get hpa
+```
+
+Check scaling activities:
+
+```bash
+kubectl describe hpa mb-deployment
+```
+
+Check cluster events:
+
+```bash
+kubectl get events
+```
+
+Check pod logs:
+
+```bash
+kubectl logs <pod-name>
+```
+
+After the CPU load decreases, HPA can scale down the number of pods.
+
+### Step 6: Delete Deployment
+
+```bash
+kubectl delete -f auto.yml
+```
+
+---
+
+# 4. HPA Using YAML Manifest
+
+We can also configure HPA using a YAML manifest file.
+
+### Step 1: Create Deployment
+
+```bash
+vi auto.yml
+```
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/internetbankingrepo:latest
+```
+
+Apply deployment:
+
+```bash
+kubectl apply -f auto.yml
+```
+
+### Step 2: Create HPA Manifest
+
+```bash
+vi hpa.yml
+```
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ib-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ib-deployment
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 20
+```
+
+### Explanation
+
+- `scaleTargetRef`: Specifies the target deployment.
+- `minReplicas`: Minimum number of pods.
+- `maxReplicas`: Maximum number of pods.
+- `averageUtilization`: Target average CPU utilization percentage.
+
+Apply HPA:
+
+```bash
+kubectl apply -f hpa.yml
+```
+
+Verify:
+
+```bash
+kubectl get hpa
+kubectl get pods
+```
+
+Monitor scaling:
+
+```bash
+kubectl get pods --watch
+```
+
+Delete Metrics Server:
+
+```bash
+kubectl delete -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml
+```
+
+---
+
+# 5. Vertical Pod Autoscaler (VPA)
+
+## What is VPA?
+
+Vertical Pod Autoscaler automatically adjusts CPU and memory requests for pods based on resource usage.
+
+Unlike HPA, which increases or decreases pod replicas, VPA changes the resources allocated to individual pods.
+
+**Note:** VPA is not included in Kubernetes by default. It requires separate installation and CRDs.
+
+## What is CRD?
+
+CRD stands for Custom Resource Definition.
+
+It allows us to extend Kubernetes by creating our own resource types beyond built-in resources like Pods, Services, and Deployments.
+
+## VPA Components
+
+### 1. Recommender
+
+- Monitors CPU and memory usage.
+- Calculates suitable resource requests.
+
+### 2. Updater
+
+- Identifies pods that need resource changes.
+- Evicts pods when required.
+- Allows new pods to start with updated resources.
+
+### 3. Admission Controller
+
+- Applies recommended resource values when new pods are created.
+
+## VPA Update Modes
+
+| Mode | Description |
+|---|---|
+| Off | Provides recommendations only |
+| Initial | Applies recommendations when pods are created |
+| Recreate | Recreates pods to apply updated resources |
+| InPlaceOrRecreate | Attempts in-place updates before recreating pods |
+
+## Install VPA
+
+Install Git:
+
+```bash
+yum install -y git
+```
+
+Clone the autoscaler repository:
+
+```bash
+git clone https://github.com/kubernetes/autoscaler.git
+```
+
+Navigate to VPA directory:
+
+```bash
+cd autoscaler/vertical-pod-autoscaler
+```
+
+Install VPA:
+
+```bash
+./hack/vpa-up.sh
+```
+
+Check VPA components:
+
+```bash
+kubectl get pods -n kube-system | grep vpa
+```
+
+## Install Metrics Server
+
+```bash
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/high-availability-1.21+.yaml
+```
+
+Check:
+
+```bash
+kubectl get pods -n kube-system | grep metrics-server
+```
+
+---
+
+# 6. Practical VPA Lab
+
+### Step 1: Create Deployment
+
+```bash
+vi deploy.yml
+```
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: demo
+  template:
+    metadata:
+      labels:
+        app: demo
+    spec:
+      containers:
+      - name: demo-container
+        image: polinux/stress
+        command: ["stress"]
+        args: ["--cpu", "1", "--vm", "1", "--vm-bytes", "128M"]
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "50Mi"
+```
+
+Apply deployment:
+
+```bash
+kubectl apply -f deploy.yml
+```
+
+Check metrics:
+
+```bash
+kubectl top pods
+```
+
+Check resource requests:
+
+```bash
+kubectl describe pods -l app=demo | grep -A3 "Requests:"
+```
+
+### Step 2: Create VPA Object
+
+```bash
+vi vpa.yml
+```
+
+```yaml
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: demo-vpa
+spec:
+  targetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: demo-app
+  updatePolicy:
+    updateMode: "Recreate"
+  resourcePolicy:
+    containerPolicies:
+    - containerName: demo-container
+      minAllowed:
+        cpu: 50m
+        memory: 50Mi
+      maxAllowed:
+        cpu: "2"
+        memory: 500Mi
+```
+
+Apply VPA:
+
+```bash
+kubectl apply -f vpa.yml
+```
+
+### Step 3: Verify VPA
+
+```bash
+kubectl get vpa
+```
+
+Check VPA checkpoints:
+
+```bash
+kubectl get verticalpodautoscalercheckpoints
+```
+
+Check recommendations:
+
+```bash
+kubectl describe vpa demo-vpa
+```
+
+Check pod resource requests:
+
+```bash
+kubectl get pods --watch
+kubectl describe pod <new-pod-name> | grep -A2 "Requests"
+```
+
+### Important VPA Terms
+
+- Uncapped Target: Actual resource usage-based recommendation before applying resource policy limits.
+- Lower Bound: Minimum recommended resource value.
+- Target: Recommended resource value.
+- Upper Bound: Maximum recommended resource value.
+
+### Delete VPA Resources
+
+```bash
+kubectl delete -f vpa.yml
+kubectl delete -f deploy.yml
+```
+
+---
+
+# 7. HPA vs VPA
+
+| Feature | HPA | VPA |
+|---|---|---|
+| Scaling Type | Horizontal | Vertical |
+| Action | Adds or removes pods | Adjusts CPU and memory |
+| Main Purpose | Handle changing traffic | Optimize pod resources |
+| Typical Use | Web applications | Resource-intensive workloads |
+| Pod Restart | Usually not required for scaling | May be required |
+
+**Important:** Using HPA and VPA together on the same resource metrics can cause conflicts and unstable scaling behavior.
+
+---
+
+# 8. Goldilocks
+
+## What is Goldilocks?
+
+Goldilocks is an open-source Kubernetes tool developed by Fairwinds.
+
+It provides recommendations for CPU and memory requests and limits using VPA recommendations.
+
+It helps prevent resource requests and limits from being too high or too low.
+
+## Install Goldilocks
+
+Add Helm repository:
+
+```bash
+helm repo add fairwinds-stable https://charts.fairwinds.com/stable
+```
+
+Create namespace:
+
+```bash
+kubectl create namespace goldilocks
+```
+
+Install Goldilocks:
+
+```bash
+helm install goldilocks --namespace goldilocks fairwinds-stable/goldilocks
+```
+
+Enable Goldilocks for namespaces:
+
+```bash
+kubectl label ns goldilocks goldilocks.fairwinds.com/enabled=true
+```
+
+```bash
+kubectl label namespace default goldilocks.fairwinds.com/enabled=true
+```
+
+Expose dashboard:
+
+```bash
+kubectl patch svc goldilocks-dashboard -n goldilocks -p '{"spec": {"type": "LoadBalancer"}}'
+```
+
+Check service:
+
+```bash
+kubectl get svc goldilocks-dashboard -n goldilocks
+```
+
+---
+
+# 9. KEDA – Kubernetes Event-Driven Autoscaler
+
+## What is KEDA?
+
+KEDA stands for Kubernetes Event-Driven Autoscaler.
+
+It is used to automatically scale Kubernetes applications based on external events and metrics.
+
+HPA normally scales based on CPU and memory, but KEDA supports event-based scaling.
+
+## Why KEDA?
+
+In real-world applications, scaling may depend on:
+
+- Kafka messages
+- RabbitMQ queue length
+- Redis queue size
+- AWS SQS messages
+- Azure Service Bus
+- Prometheus metrics
+- Cron schedules
+
+### Real-World Example
+
+Imagine an e-commerce application during a festival sale.
+
+- Normal traffic: 10 orders → 1 pod is enough.
+- Sale traffic: 10,000 orders → More consumer pods are required.
+
+KEDA monitors the queue and helps Kubernetes scale pods based on the number of waiting messages.
+
+## HPA vs KEDA
+
+| HPA | KEDA |
+|---|---|
+| CPU and memory scaling | Event-based scaling |
+| Uses resource metrics | Supports external event sources |
+| Requires Metrics Server for resource metrics | Supports many external scalers |
+| Traditional autoscaling | Event-driven autoscaling |
+
+## KEDA Architecture
+
+```text
+AWS SQS Queue
+      |
+      v
+     KEDA
+      |
+      v
+     HPA
+      |
+      v
+ Kubernetes Pods
+```
+
+**Important:** KEDA does not directly scale pods. It creates and manages an HPA that performs the scaling.
+
+---
+
+# 10. KEDA Practical Lab – AWS SQS Scaling
+
+## Step 1: Create AWS SQS Queue
+
+Open AWS Console and create an SQS queue.
+
+Queue Name:
+
+```text
+orders-queue
+```
+
+SQS acts as a message buffer between the application and consumer pods.
+
+## Step 2: Install Helm
+
+```bash
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+```
+
+```bash
+chmod 700 get_helm.sh
+```
+
+```bash
+./get_helm.sh
+```
+
+Check Helm:
+
+```bash
+helm version
+```
+
+## Step 3: Install KEDA
+
+Add Helm repository:
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+```
+
+Update repository:
+
+```bash
+helm repo update
+```
+
+Install KEDA:
+
+```bash
+helm install keda kedacore/keda -n keda --create-namespace
+```
+
+Check KEDA pods:
+
+```bash
+kubectl get pods -n keda
+```
+
+Important components:
+
+- `keda-operator`: Monitors events and manages scaling.
+- `keda-metrics-apiserver`: Exposes external and custom metrics to Kubernetes.
+
+## Step 4: Create Namespace
+
+```bash
+kubectl create namespace keda-demo
+```
+
+## Step 5: Create Consumer Deployment
+
+```bash
+vi consumer.yml
+```
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sqs-consumer
+  namespace: keda-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sqs-consumer
+  template:
+    metadata:
+      labels:
+        app: sqs-consumer
+    spec:
+      containers:
+      - name: consumer
+        image: nginx
+```
+
+Apply:
+
+```bash
+kubectl apply -f consumer.yml
+```
+
+Check:
+
+```bash
+kubectl get pods -n keda-demo
+```
+
+## Step 6: Give KEDA Access to AWS
+
+Create a Kubernetes Secret:
+
+```bash
+vi aws-secret.yml
+```
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aws-secret
+  namespace: keda-demo
+type: Opaque
+stringData:
+  AWS_ACCESS_KEY_ID: XXXXX
+  AWS_SECRET_ACCESS_KEY: XXXXX
+```
+
+Apply:
+
+```bash
+kubectl apply -f aws-secret.yml
+```
+
+**Security Note:** Never upload real AWS access keys or secret keys to GitHub. Use IAM roles and appropriate secret-management methods in production.
+
+## Step 7: Create TriggerAuthentication
+
+```bash
+vi triggerauth.yml
+```
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: aws-auth
+  namespace: keda-demo
+spec:
+  secretTargetRef:
+  - parameter: awsAccessKeyID
+    name: aws-secret
+    key: AWS_ACCESS_KEY_ID
+  - parameter: awsSecretAccessKey
+    name: aws-secret
+    key: AWS_SECRET_ACCESS_KEY
+```
+
+Apply:
+
+```bash
+kubectl apply -f triggerauth.yml
+```
+
+TriggerAuthentication connects KEDA with the AWS credentials stored in the Kubernetes Secret.
+
+## Step 8: Create ScaledObject
+
+```bash
+vi scaledobject.yml
+```
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: sqs-scaler
+  namespace: keda-demo
+spec:
+  scaleTargetRef:
+    name: sqs-consumer
+  pollingInterval: 15
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+  - type: aws-sqs-queue
+    authenticationRef:
+      name: aws-auth
+    metadata:
+      queueURL: https://sqs.ap-south-1.amazonaws.com/ACCOUNT_ID/orders-queue
+      awsRegion: ap-south-1
+      queueLength: "5"
+```
+
+Apply:
+
+```bash
+kubectl apply -f scaledobject.yml
+```
+
+### Explanation
+
+- `pollingInterval: 15` – KEDA checks the queue every 15 seconds.
+- `minReplicaCount: 1` – Minimum number of pods.
+- `maxReplicaCount: 10` – Maximum number of pods.
+- `queueLength: "5"` – Target queue length per replica.
+
+## Step 9: Verify HPA
+
+```bash
+kubectl get scaledobject -n keda-demo
+```
+
+```bash
+kubectl get hpa -n keda-demo
+```
+
+Architecture:
+
+```text
+AWS SQS
+   |
+   v
+  KEDA
+   |
+   v
+  HPA
+   |
+   v
+Consumer Pods
+```
+
+## Step 10: Generate Messages
+
+Run from a terminal configured with AWS CLI permissions:
+
+```bash
+for i in {1..50}
+do
+  aws sqs send-message \
+    --queue-url https://sqs.ap-south-1.amazonaws.com/ACCOUNT_ID/orders-queue \
+    --message-body "order-$i"
+done
+```
+
+## Step 11: Watch Scaling
+
+```bash
+kubectl get pods -n keda-demo -w
+```
+
+Check HPA:
+
+```bash
+kubectl get hpa -n keda-demo
+```
+
+### What Happens Internally?
+
+Before:
+
+```text
+Queue Messages = 0
+Pods = 1
+```
+
+After sending messages:
+
+```text
+Queue Messages = 50
+```
+
+KEDA detects the queue length and the HPA scales the consumer deployment based on the configured target.
+
+**Note:** This lab demonstrates scaling configuration. A production consumer application must actually read and process SQS messages. The NGINX container in this example does not process queue messages.
+
+---
+
+# 11. KEDA Cron Scaling
+
+## What is KEDA Cron Scaling?
+
+KEDA Cron Scaler automatically scales pods based on a predefined schedule.
+
+Unlike CPU-based scaling, it uses time-based rules.
+
+### Real-World Example
+
+Imagine an application used during office hours.
+
+```text
+9 AM – 6 PM
+      |
+      v
+  Scale to 5 Pods
+      |
+      v
+After 6 PM
+      |
+      v
+  Scale to 1 Pod
+```
+
+This helps reduce resource usage during low-traffic hours.
+
+## Practical Lab
+
+### Step 1: Create Namespace
+
+```bash
+kubectl create namespace cron-demo
+```
+
+### Step 2: Create Deployment
+
+```bash
+vi nginx.yaml
+```
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-demo
+  namespace: cron-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx-demo
+  template:
+    metadata:
+      labels:
+        app: nginx-demo
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+```
+
+Apply:
+
+```bash
+kubectl apply -f nginx.yaml
+```
+
+### Step 3: Create Cron ScaledObject
+
+```bash
+vi cron-scaler.yaml
+```
+
+```yaml
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: cron-scaler
+  namespace: cron-demo
+spec:
+  scaleTargetRef:
+    name: nginx-demo
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+  - type: cron
+    metadata:
+      timezone: UTC
+      start: "17 10 * * *"
+      end: "20 10 * * *"
+      desiredReplicas: "5"
+```
+
+Apply:
+
+```bash
+kubectl apply -f cron-scaler.yaml
+```
+
+### Step 4: Verify Scaling
+
+```bash
+kubectl get scaledobject -n cron-demo
+```
+
+```bash
+kubectl get hpa -n cron-demo
+```
+
+```bash
+kubectl get pods -n cron-demo -w
+```
+
+**Note:** The example uses UTC timezone. Update the schedule and timezone according to your requirements.
+
+---
+
+# 12. HPA and VPA Together
+
+Can HPA and VPA work together?
+
+Yes, but using them on the same resource metrics can cause conflicts.
+
+- HPA changes the number of replicas.
+- VPA changes CPU and memory resource requests.
+
+Carefully configure them to avoid unstable scaling behavior.
+
+## What Metrics Does HPA Use?
+
+- CPU utilization
+- Memory utilization
+- Custom metrics
+- External metrics
+
+## Default Metrics Source
+
+Kubernetes Metrics Server provides CPU and memory metrics for HPA.
+
+If Metrics Server is unavailable, you may see errors such as:
+
+```text
+unable to get metrics for resource cpu
+```
+
+## Why HPA May Not Scale
+
+Possible reasons:
+
+1. Metrics Server is not installed or working.
+2. CPU requests are not defined.
+3. Insufficient application load.
+4. RBAC permission issues.
+
+---
+
+# 13. HPA vs Cluster Autoscaler
+
+| Component | Function |
+|---|---|
+| HPA | Scales pods |
+| Cluster Autoscaler | Scales worker nodes |
+
+### What Happens When There Is No Node Capacity?
+
+1. HPA requests more pod replicas.
+2. New pods may enter Pending state.
+3. Cluster Autoscaler, if enabled and properly configured, can add worker nodes.
+
+---
+
+# 14. HPA Stabilization Window
+
+## What is Scaling Stabilization?
+
+Stabilization helps prevent frequent scaling up and down when application metrics fluctuate.
+
+This behavior helps avoid a problem called **Scaling Flapping**.
+
+### What is Scaling Flapping?
+
+Example:
+
+```text
+CPU increases
+     |
+     v
+Scale Out
+     |
+     v
+CPU decreases
+     |
+     v
+Scale In
+     |
+     v
+CPU increases again
+     |
+     v
+Scale Out
+```
+
+This repeated scaling can affect application stability.
+
+## ScaleUp Stabilization
+
+Prevents HPA from reacting too aggressively to temporary metric spikes.
+
+## ScaleDown Stabilization
+
+Prevents pods from being removed too quickly when traffic temporarily decreases.
+
+### HPA YAML Example
+
+```yaml
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ib-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ib-deployment
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 20
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0
+    scaleDown:
+      stabilizationWindowSeconds: 300
+```
+
+### Explanation
+
+| Setting | Meaning |
+|---|---|
+| 0 seconds | React immediately |
+| 60 seconds | Wait 1 minute |
+| 300 seconds | Wait 5 minutes |
+
+Benefits:
+
+- Avoids removing pods too early.
+- Prevents performance drops.
+- Helps handle temporary traffic changes.
+- Makes scaling more predictable.
+
+---
+
+# 15. Kubernetes Resource Quota
+
+## What is Resource Quota?
+
+ResourceQuota is a Kubernetes object used to restrict the total amount of resources and the number of objects that can be created inside a namespace.
+
+It helps administrators control CPU, memory, storage, and object consumption.
+
+## Important Concepts
+
+### Namespace
+
+A Kubernetes cluster can be divided into multiple namespaces.
+
+### CPU
+
+CPU is measured in cores or millicores.
+
+```text
+1 CPU = 1000 millicores
+```
+
+### Memory
+
+Memory is measured in bytes, usually represented using units like Mi and Gi.
+
+### Requests vs Limits
+
+| Requests | Limits |
+|---|---|
+| Minimum resource requirement used for scheduling | Maximum resource usage allowed |
+| Used by scheduler | Used for resource enforcement |
+
+## Practical Resource Quota Lab
+
+### Step 1: Create Namespace
+
+```bash
+kubectl create namespace dev
+```
+
+Set the current namespace:
+
+```bash
+kubectl config set-context --current --namespace=dev
+```
+
+Check current context:
+
+```bash
+kubectl config view
+```
+
+### Step 2: Create Resource Quota
+
+```bash
+vi dev-quota.yml
+```
+
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: dev-quota
+  namespace: dev
+spec:
+  hard:
+    pods: "5"
+    limits.cpu: "1"
+    limits.memory: 1Gi
+```
+
+### Explanation
+
+- Maximum Pods: 5
+- Total CPU Limits: 1 CPU
+- Total Memory Limits: 1 GiB
+
+Apply:
+
+```bash
+kubectl create -f dev-quota.yml
+```
+
+Check quota:
+
+```bash
+kubectl get quota
+```
+
+### Step 3: Create Deployment
+
+```bash
+vi deploy.yml
+```
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/internetbankingrepo:latest
+        resources:
+          limits:
+            cpu: "1"
+            memory: 512Mi
+```
+
+Apply:
+
+```bash
+kubectl create -f deploy.yml
+```
+
+Check pods:
+
+```bash
+kubectl get pods
+```
+
+Because the namespace has a total CPU limit of 1 CPU and memory limit of 1 GiB, all three pods cannot necessarily fit within the configured quota.
+
+### Step 4: Reduce Resource Limits
+
+Delete the deployment:
+
+```bash
+kubectl delete -f deploy.yml
+```
+
+Update the manifest:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/internetbankingrepo:latest
+        resources:
+          limits:
+            cpu: "300m"
+            memory: 300Mi
+```
+
+Apply:
+
+```bash
+kubectl create -f deploy.yml
+```
+
+Verify:
+
+```bash
+kubectl get pods
+kubectl get quota
+```
+
+The reduced limits allow the three replicas to fit within the namespace quota, assuming no other resources are consuming it.
+
+---
+
+# 16. Important Kubernetes Autoscaling Commands
+
+| Command | Purpose |
+|---|---|
+| `kubectl top pods` | Check pod resource usage |
+| `kubectl top nodes` | Check node resource usage |
+| `kubectl get hpa` | List HPA objects |
+| `kubectl describe hpa <name>` | View HPA details |
+| `kubectl get vpa` | List VPA objects |
+| `kubectl describe vpa <name>` | View VPA recommendations |
+| `kubectl get scaledobject -A` | List KEDA ScaledObjects |
+| `kubectl get quota` | Check namespace quotas |
+| `kubectl describe quota <name>` | View quota details |
+| `kubectl get events` | View Kubernetes events |
+| `kubectl get pods -w` | Watch pod changes |
+
+---
+
+# 17. Important Interview Questions
+
+### 1. What is Metrics Server?
+
+Metrics Server collects CPU and memory usage information from Kubernetes nodes and pods.
+
+### 2. Why do we need Metrics Server?
+
+It provides resource metrics for HPA and commands such as `kubectl top`.
+
+### 3. What is HPA?
+
+HPA automatically increases or decreases pod replicas based on resource utilization or supported metrics.
+
+### 4. What is VPA?
+
+VPA adjusts CPU and memory resource requests for pods based on usage recommendations.
+
+### 5. What is the difference between HPA and VPA?
+
+HPA scales the number of pods, while VPA adjusts resources allocated to pods.
+
+### 6. What is KEDA?
+
+KEDA is a Kubernetes event-driven autoscaler that supports scaling based on external events such as queue messages.
+
+### 7. What is the relationship between KEDA and HPA?
+
+KEDA creates and manages HPA resources to scale Kubernetes workloads.
+
+### 8. What is a ScaledObject?
+
+A KEDA ScaledObject defines the target workload, minimum and maximum replicas, and scaling triggers.
+
+### 9. What is VPA Recommender?
+
+It monitors resource usage and calculates suitable CPU and memory recommendations.
+
+### 10. What is VPA Updater?
+
+It identifies pods that need resource updates and can evict them so they restart with updated resources.
+
+### 11. What is Goldilocks?
+
+Goldilocks provides Kubernetes resource recommendations using VPA.
+
+### 12. What is ResourceQuota?
+
+ResourceQuota restricts total resource consumption and object counts inside a namespace.
+
+### 13. What is Scaling Flapping?
+
+It is repeated scaling up and down due to frequently changing metrics.
+
+### 14. How can we prevent Scaling Flapping?
+
+Configure HPA stabilization windows and appropriate scaling behavior.
+
+### 15. What is Cluster Autoscaler?
+
+Cluster Autoscaler adjusts the number of worker nodes based on scheduling requirements.
+
+### 16. What happens when Metrics Server is not working?
+
+Resource metrics may become unavailable, affecting `kubectl top` and resource-based HPA scaling.
+
+### 17. Can HPA and VPA work together?
+
+Yes, with careful configuration. Avoid using them on the same resource metrics because they may conflict.
+
+### 18. What is the difference between HPA and Cluster Autoscaler?
+
+HPA scales pods, while Cluster Autoscaler scales worker nodes.
+
+### 19. What is a CRD?
+
+Custom Resource Definition extends Kubernetes with new resource types.
+
+### 20. Why do we use KEDA Cron Scaler?
+
+It scales workloads according to predefined time schedules.
+
+---
+
+# 18. Quick Summary
+
+| Component | Main Purpose |
+|---|---|
+| Metrics Server | Collects CPU and memory metrics |
+| HPA | Scales the number of pods |
+| VPA | Adjusts CPU and memory resources |
+| KEDA | Scales based on external events |
+| Goldilocks | Provides resource recommendations |
+| ResourceQuota | Controls namespace resource usage |
+| Cluster Autoscaler | Scales worker nodes |
+
+## Final Understanding
+
+- Metrics Server collects resource usage information.
+- HPA increases or decreases pod replicas.
+- VPA adjusts CPU and memory resource requests.
+- KEDA supports event-driven autoscaling.
+- Goldilocks helps optimize resource requests and limits.
+- ResourceQuota controls resource consumption inside namespaces.
+- Cluster Autoscaler manages worker node scaling.
+
+**Practice these labs to understand Kubernetes autoscaling and resource management practically.**
