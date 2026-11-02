@@ -1,0 +1,26 @@
+# deploy.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pvdeploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: nginx
+        command: ["/bin/bash", "-c", "sleep 10000"]
+        volumeMounts:
+        - name: my-bankpvc
+          mountPath: "/tmp/persistent"
+      volumes:
+      - name: my-bankpvc
+        persistentVolumeClaim:
+          claimName: my-pvc
