@@ -1,0 +1,302 @@
+Kubernetes Persistent Volumes (PV), PVC, StorageClass & StatefulSet
+
+Hands-on notes with YAML examples, interview Q&A, and the multi-container pod pattern.
+
+Table of Contents
+Stateless vs Stateful
+PV and PVC
+Access Modes
+Reclaim Policy
+Static Provisioning (EBS)
+Dynamic Provisioning (StorageClass)
+StatefulSet
+Multi-Container Pod
+Interview Questions
+Stateless vs Stateful
+Stateless	Stateful
+Delete the pod, data is lost (stored on the pod/node)	Delete the pod, data survives (stored in external storage such as AWS EBS)
+
+Persistent Volumes exist independently of pods, so they suit databases and other stateful apps.
+
+PV and PVC
+Pod
+ ↓
+PVC (request for storage)
+ ↓
+PV (actual storage)
+ ↓
+Physical disk / cloud storage (EBS, EFS)
+Component	Purpose
+PV	Actual storage, created by an admin or dynamically by a StorageClass
+PVC	A user's request for storage (size, access mode, class)
+Pod	Mounts the PVC, never the PV directly
+Kubernetes matches a PVC to a PV by size, access mode and storage class; the PVC then shows Bound.
+If no PV matches, a new one is provisioned dynamically (if a StorageClass supports it) or the PVC stays Pending.
+One PVC binds to exactly one PV.
+If volumes live inside the cluster, deleting the cluster deletes them. Use external storage like AWS EBS.
+Access Modes
+Mode	Nodes	Pods	Access	Typical use
+RWO (ReadWriteOnce)	Single node	Multiple (same node)	Read/Write	Databases, EBS
+ROX (ReadOnlyMany)	Multiple	Multiple	Read-only	Shared static data
+RWX (ReadWriteMany)	Multiple	Multiple	Read/Write	Shared storage, EFS/NFS
+RWOP (ReadWriteOncePod)	Single pod	One pod	Read/Write	Strict single-pod workloads
+Reclaim Policy
+Policy	Meaning
+Retain	PV and data kept after PVC deletion (status Released, admin cleans up manually)
+Delete	PV and underlying storage deleted automatically (good for test/temp)
+Recycle	Deprecated
+Static Provisioning (EBS)
+Create a 20GB EBS volume in AWS.
+Create the PV:
+yaml
+# pv.yml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: my-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  awsElasticBlockStore:
+    volumeID: vol-xxxxxxxxxxxxxxxxx
+    fsType: ext4
+Create the PVC:
+yaml
+# pvc.yml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: my-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+Use it in a Deployment:
+yaml
+# deploy.yml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pvdeploy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: nginx
+        command: ["/bin/bash", "-c", "sleep 10000"]
+        volumeMounts:
+        - name: my-bankpvc
+          mountPath: "/tmp/persistent"
+      volumes:
+      - name: my-bankpvc
+        persistentVolumeClaim:
+          claimName: my-pvc
+bash
+kubectl create -f pv.yml
+kubectl create -f pvc.yml
+kubectl create -f deploy.yml
+kubectl get pv,pvc,pods
+Prove persistence
+bash
+kubectl exec -it <pod> -- /bin/bash
+cd /tmp/persistent && touch file{1..5}
+exit
+
+kubectl delete pod <pod>          # a new pod is created automatically
+kubectl get pods
+kubectl exec -it <new-pod> -- ls /tmp/persistent   # files are still there
+
+Note: a PVC can stay Pending until a pod uses it (WaitForFirstConsumer). Check kubectl get events.
+
+Resizing
+
+Increase the EBS volume, then update the PVC size. Volumes can only grow, never shrink. In modern clusters the StorageClass must have allowVolumeExpansion: true.
+
+Dynamic Provisioning (StorageClass)
+
+A StorageClass creates PVs automatically when a PVC asks for one. No manual PV or EBS creation needed (enabled by default in kOps).
+
+bash
+kubectl get storageclass
+yaml
+# ebs-pvc.yml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ebs-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: gp2   # or gp3
+yaml
+# ebs-pod.yml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ebs-nginx
+spec:
+  containers:
+  - name: web
+    image: nginx
+    volumeMounts:
+    - mountPath: /usr/share/nginx/html
+      name: ebs-volume
+  volumes:
+  - name: ebs-volume
+    persistentVolumeClaim:
+      claimName: ebs-pvc
+bash
+kubectl apply -f ebs-pvc.yml
+kubectl apply -f ebs-pod.yml
+kubectl get pvc,pv,pod
+
+The PVC shows Bound, and the EBS volume appears as in-use in the AWS console.
+
+Internal flow:
+
+PVC created → StorageClass detected → CSI driver invoked → cloud disk created → PV auto-created → PVC bound
+
+Cleanup
+
+bash
+kubectl delete pvc my-pvc -n default
+kubectl delete pv my-pv
+StatefulSet
+
+A StatefulSet manages stateful apps: stable pod names, stable DNS, ordered deployment, and one PVC per pod.
+
+yaml
+# nginxstateful.yml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  serviceName: "nginx"
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        - containerPort: 80
+          name: web
+        volumeMounts:
+        - name: www
+          mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+  - metadata:
+      name: www
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+bash
+kubectl create -f nginxstateful.yml
+kubectl get pv,pvc,pods
+kubectl delete pvc www-web-0 www-web-1 www-web-2   # cleanup
+
+Stateful is a characteristic of an application; StatefulSet is the Kubernetes resource used to run it.
+
+Multi-Container Pod
+
+Usually 1 pod = 1 container. Use multiple containers when they must closely collaborate (main app + logging/monitoring sidecar).
+
+yaml
+# multicont.yml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container-pod
+spec:
+  containers:
+  - name: nginx-container
+    image: nginx:latest
+    ports:
+    - containerPort: 80
+  - name: logger-container
+    image: busybox:latest
+    command: ["sh", "-c", "while true; do echo Hello from the logger container; sleep 5; done"]
+bash
+kubectl create -f multicont.yml
+kubectl logs multi-container-pod -c logger-container
+kubectl logs multi-container-pod -c nginx-container
+Interview Questions
+
+PV vs PVC? PV is the actual storage; PVC is the request for storage.
+
+Why PV/PVC? Containers are ephemeral. PV/PVC give persistent, durable storage decoupled from the pod lifecycle.
+
+Why PVC instead of using a PV directly? It decouples the application from the storage implementation.
+
+What happens when a PVC is deleted? Depends on the reclaim policy: Retain keeps PV and data; Delete removes the backend disk.
+
+Can multiple pods use the same PVC? Yes, if the storage supports RWX (NFS, EFS). Not with most block storage like EBS.
+
+Can one PVC bind to multiple PVs? No, only one.
+
+Why is a PVC stuck in Pending? No matching PV, wrong access mode, insufficient size, or missing StorageClass.
+
+Static vs dynamic provisioning?
+
+Static	Dynamic
+Admin creates PV manually	Kubernetes creates PV automatically
+Manual work	Automated, modern approach
+
+What is CSI? Container Storage Interface, which lets external storage providers (e.g., AWS EBS CSI) plug into Kubernetes.
+
+hostPath vs PV? hostPath is node-local and not production-ready; PV is a proper, portable persistence abstraction.
+
+StatefulSet and PVC? A StatefulSet creates a separate PVC for each pod (MySQL, MongoDB, etc.).
+
+Can you resize/shrink a PVC? Increase yes, decrease no.
+
+What if a node crashes? With network/cloud storage the pod reschedules, the volume reattaches, and data stays safe.
+
+emptyDir vs PVC? emptyDir is temporary and deleted with the pod; PVC survives pod deletion.
+
+Volume binding modes? Immediate binds right away; WaitForFirstConsumer waits until the pod is scheduled (useful in multi-zone clusters).
+
+volumes vs volumeMounts? volumes defines the storage source; volumeMounts mounts it at a path inside the container.
+
+Block vs file storage?
+
+Block (EBS, Azure Disk)	File (EFS, NFS)
+Usually RWO, faster	Usually RWX, shared access
+
+Troubleshooting commands
+
+bash
+kubectl get pv
+kubectl get pvc
+kubectl describe pv
+kubectl describe pvc
+kubectl get storageclass
+kubectl get events
+
+Check events, CSI logs, node attach issues, and access mode mismatches.
+
+Version note: the in-tree awsElasticBlockStore volume type is removed in recent Kubernetes versions. On newer clusters use the AWS EBS CSI driver (csi: volume source or a CSI-backed StorageClass).
