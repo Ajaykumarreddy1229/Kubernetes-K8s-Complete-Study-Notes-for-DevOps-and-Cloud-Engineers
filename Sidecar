@@ -1,0 +1,749 @@
+# Kubernetes Advanced Concepts – Hands-on Practice
+
+## Topics Covered
+
+1. Sidecar Pattern
+2. Ambassador Pattern
+3. Adapter Pattern
+4. Init Containers
+5. Ingress Controller
+6. NGINX Ingress Controller
+7. ImagePullBackOff
+8. CrashLoopBackOff
+9. Kubernetes Networking
+10. CNI Plugins
+11. Container Runtime – CRI, containerd, SHIM and runc
+12. Kubernetes Services
+13. kube-proxy
+14. CoreDNS and Service Discovery
+15. Network Policies
+16. Kubernetes Network Troubleshooting
+17. Service Mesh
+18. East-West and North-South Traffic
+
+---
+
+## 1. Sidecar Pattern
+
+A Sidecar is a secondary container that runs inside the same Pod along with the main application container.
+
+- Main container runs the application.
+- Sidecar container provides additional support to the main application.
+- Both containers share the same Pod environment.
+- Sidecars are commonly used for logging, monitoring and metrics.
+
+### Sidecar Architecture
+
+```text
+Pod
+│
+├── Main Container
+│      Application
+│
+└── Sidecar Container
+       Logging / Monitoring
+```
+
+### Different Container Patterns
+
+| Pattern | Purpose |
+|---|---|
+| Ambassador | Proxy communication |
+| Adapter | Transform input/output |
+| Sidecar | Add helper functionality |
+| Init Sidecar | Initialization |
+| Service Mesh Sidecar | Traffic and security management |
+
+### Example: Log Aggregation Using Sidecar
+
+The main application writes logs into a shared volume. The sidecar container uses NGINX to serve those logs.
+
+Create `sidecar.yml`.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: log-aggregator-pod
+spec:
+  containers:
+    - name: app-container
+      image: alpine
+      command: ["/bin/sh", "-c"]
+      args: ["while true; do date >> /var/log/app.log; sleep 5; done"]
+      volumeMounts:
+        - name: shared-logs
+          mountPath: /var/log
+
+    - name: sidecar-container
+      image: nginx
+      volumeMounts:
+        - name: shared-logs
+          mountPath: /usr/share/nginx/html
+
+  volumes:
+    - name: shared-logs
+      emptyDir: {}
+```
+
+### Commands
+
+```bash
+kubectl apply -f sidecar.yml
+
+kubectl get pods
+
+kubectl describe pods log-aggregator-pod
+
+kubectl exec -it log-aggregator-pod -c sidecar-container -- sh
+
+cd /usr/share/nginx/html
+
+cat app.log
+
+kubectl delete -f sidecar.yml
+```
+
+**Important:** The application container generates `app.log`, and the sidecar container accesses the same file through the shared volume.
+
+`emptyDir` is temporary storage that exists for the lifetime of the Pod.
+
+---
+
+## 2. Init Containers
+
+An Init Container performs initialization work before the main application container starts.
+
+- It executes the initialization task first.
+- After successful completion, the main application container starts.
+- It is useful when an application depends on another service.
+
+### Example
+
+Create `init.yml`.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app.kubernetes.io/name: MyApp
+spec:
+  containers:
+    - name: myapp-container
+      image: busybox:1.28
+      env:
+        - name: FIRSTNAME
+          value: "REYAZ"
+      command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+
+  initContainers:
+    - name: init-myservice
+      image: busybox:1.28
+      command: ['sh', '-c']
+      args:
+        - 'until nslookup ib-service.default.svc.cluster.local; do echo waiting for ib-service; sleep 2; done'
+```
+
+### Commands
+
+```bash
+kubectl create -f init.yml
+
+kubectl get pods
+
+kubectl logs pod/myapp-pod -c init-myservice
+```
+
+### Sidecar vs Init Container
+
+| Sidecar | Init Container |
+|---|---|
+| Runs continuously | Runs once and completes |
+| Supports the main application | Prepares the environment |
+| Runs alongside the application | Completes before the application starts |
+
+---
+
+## 3. Ingress Controller
+
+Ingress helps expose applications running inside a Kubernetes cluster through HTTP and HTTPS routes.
+
+### Main Features
+
+- Host-based routing
+- Path-based routing
+- Load balancing
+- SSL/TLS termination
+- External application access
+
+### Host-Based Routing
+
+Routes traffic based on the hostname.
+
+Examples:
+
+```text
+boom.com
+web.boom.com
+admin.boom.com
+```
+
+### Path-Based Routing
+
+Routes traffic based on the URL path.
+
+Examples:
+
+```text
+boom.com/hello
+boom.com/admin
+paytm.com/movies
+paytm.com/recharge
+```
+
+### Why Do We Need Ingress?
+
+Services such as ClusterIP, NodePort and LoadBalancer provide different ways to expose applications.
+
+Ingress provides additional HTTP/HTTPS routing based on hostnames and paths.
+
+### Install NGINX Ingress Controller
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.3.0/deploy/static/provider/cloud/deploy.yaml
+```
+
+Check the resources:
+
+```bash
+kubectl get pods
+kubectl get deploy
+kubectl get svc
+kubectl get ingress
+```
+
+### NGINX and HTTPD Applications
+
+In the practical lab, two applications were deployed:
+
+- NGINX application
+- Apache HTTPD application
+
+Both applications use ClusterIP Services.
+
+### Ingress YAML
+
+Create `ingress.yml`.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k8s-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /nginx(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nginx
+                port:
+                  number: 80
+
+          - path: /httpd(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: httpd
+                port:
+                  number: 80
+
+          - path: /(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: nginx
+                port:
+                  number: 80
+```
+
+### Apply YAML Files
+
+```bash
+kubectl apply -f nginx.yml
+
+kubectl apply -f httpd.yml
+
+kubectl apply -f ingress.yml
+
+kubectl get deploy
+
+kubectl get svc
+
+kubectl get pods
+
+kubectl get ingress
+```
+
+Check the Ingress Controller LoadBalancer:
+
+```bash
+kubectl get services ingress-nginx-controller -n ingress-nginx
+```
+
+After the external load balancer is provisioned, access:
+
+```text
+http://<ELB>/nginx
+
+http://<ELB>/httpd
+```
+
+### Important Ingress Annotations
+
+| Annotation | Purpose |
+|---|---|
+| ssl-redirect | Controls HTTP-to-HTTPS redirection |
+| use-regex | Enables regular-expression path matching |
+| rewrite-target | Rewrites the incoming URL path |
+
+**Note:** The controller installation version and annotations should be checked for compatibility before using them in a new cluster.
+
+---
+
+## 4. Pod Troubleshooting
+
+### ImagePullBackOff
+
+ImagePullBackOff means Kubernetes is unable to download the required container image.
+
+Possible reasons:
+
+- Incorrect image name.
+- Image tag does not exist.
+- Private registry authentication problem.
+- Missing imagePullSecret.
+
+Kubernetes retries pulling the image with increasing delays.
+
+Commands:
+
+```bash
+kubectl get pods
+
+kubectl describe pod <pod-name>
+
+kubectl get events
+```
+
+### CrashLoopBackOff
+
+CrashLoopBackOff means the container starts but repeatedly crashes.
+
+Kubernetes tries to restart the container automatically.
+
+Possible reasons:
+
+- Application errors.
+- Incorrect startup command.
+- Configuration problems.
+- Missing environment variables.
+- Application dependency failures.
+
+Commands:
+
+```bash
+kubectl get pods
+
+kubectl describe pod <pod-name>
+
+kubectl logs <pod-name>
+
+kubectl logs <pod-name> --previous
+```
+
+---
+
+## 5. Kubernetes Networking
+
+Kubernetes networking provides communication between containers, Pods, Services and Nodes.
+
+### Important Concepts
+
+- Every Pod gets a unique IP address.
+- Pods can communicate with each other.
+- Containers inside the same Pod communicate through localhost.
+- Services provide stable communication with Pods.
+- CNI plugins implement Pod networking.
+
+### Types of Kubernetes Communication
+
+| Communication | Description |
+|---|---|
+| Container-to-Container | Communication inside the same Pod |
+| Pod-to-Pod | Communication between Pods |
+| Pod-to-Service | Communication using Service IP or DNS |
+| External-to-Service | External access through Ingress, NodePort or LoadBalancer |
+
+### CNI – Container Network Interface
+
+CNI is responsible for implementing container networking.
+
+Main responsibilities:
+
+- Assigning Pod IP addresses.
+- Configuring network routes.
+- Providing Pod connectivity.
+- Supporting communication across Nodes.
+
+### Popular CNI Plugins
+
+| Plugin | Main Feature |
+|---|---|
+| Calico | Network Policies |
+| Flannel | Overlay Networking |
+| Cilium | eBPF Networking |
+| Weave | Container Networking |
+| AWS VPC CNI | AWS VPC Networking |
+
+Command:
+
+```bash
+kubectl get ds -A
+```
+
+This helps inspect DaemonSets running across namespaces.
+
+---
+
+## 6. Container Runtime
+
+Kubernetes uses the Container Runtime Interface (CRI) to communicate with container runtimes.
+
+### Container Creation Flow
+
+```text
+kubectl
+   |
+Kubernetes API Server
+   |
+etcd
+   |
+Kubernetes Scheduler
+   |
+Kubelet
+   |
+CRI
+   |
+containerd
+   |
+containerd-shim
+   |
+runc
+   |
+Container Starts
+```
+
+### Important Components
+
+| Component | Responsibility |
+|---|---|
+| API Server | Handles Kubernetes API requests |
+| etcd | Stores cluster state |
+| Scheduler | Selects a Node for the Pod |
+| Kubelet | Manages Pods on a Node |
+| CRI | Interface between kubelet and runtime |
+| containerd | Manages container lifecycle |
+| SHIM | Maintains container process management |
+| runc | Starts the container process |
+
+---
+
+## 7. Kubernetes Services
+
+Pods are temporary. Their IP addresses can change when they are recreated.
+
+A Kubernetes Service provides a stable IP address and DNS name to access backend Pods.
+
+### Types of Services
+
+| Service Type | Purpose |
+|---|---|
+| ClusterIP | Internal communication |
+| NodePort | External access through Node IP |
+| LoadBalancer | Cloud load balancer |
+| ExternalName | DNS mapping |
+
+### kube-proxy
+
+kube-proxy runs on Nodes and manages Service networking.
+
+Responsibilities:
+
+- Service networking.
+- Traffic forwarding.
+- iptables/IPVS rules.
+- Service virtual IP handling.
+
+### CoreDNS
+
+CoreDNS provides DNS-based Service Discovery inside Kubernetes.
+
+Service DNS format:
+
+```text
+service-name.namespace.svc.cluster.local
+```
+
+Example:
+
+```text
+mysql.production.svc.cluster.local
+```
+
+Commands:
+
+```bash
+kubectl get pods -A
+
+kubectl get svc
+
+kubectl get pods -o wide
+
+kubectl exec -it <pod-name> -- cat /etc/resolv.conf
+
+kubectl exec -it <pod-name> -- nslookup <service-name>
+```
+
+### Service Discovery Example
+
+```bash
+kubectl exec -it <pod-name> -- curl nginx
+```
+
+Kubernetes resolves the Service name through CoreDNS.
+
+---
+
+## 8. Network Policies
+
+Network Policies control communication between Pods.
+
+They work like internal firewalls inside Kubernetes.
+
+### Practical Scenario
+
+Consider this application architecture:
+
+```text
+Frontend  --->  Backend  --->  Database
+
+Frontend should NOT communicate directly with Database.
+Backend is allowed to communicate with Database.
+```
+
+### Network Policy Example
+
+Create `network.yml`.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: db-test
+
+spec:
+  podSelector:
+    matchLabels:
+      name: mysql
+
+  policyTypes:
+    - Ingress
+
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              role: backend
+      ports:
+        - protocol: TCP
+          port: 3306
+```
+
+### Explanation
+
+- `podSelector` selects the MySQL Pod.
+- `policyTypes: Ingress` applies incoming traffic rules.
+- `from` allows traffic from Pods with the backend label.
+- `port: 3306` allows MySQL traffic.
+
+### Commands
+
+```bash
+kubectl apply -f network.yml
+
+kubectl get netpol
+
+kubectl describe netpol db-test
+```
+
+### Test Connectivity
+
+From Frontend:
+
+```bash
+kubectl exec -it frontend -- bash
+
+telnet db 3306
+```
+
+The connection should be blocked by the policy.
+
+From Backend:
+
+```bash
+kubectl exec -it backend -- bash
+
+telnet db 3306
+```
+
+The connection should be allowed by the policy.
+
+**Important:** NetworkPolicy enforcement depends on the CNI plugin supporting NetworkPolicies.
+
+---
+
+## 9. Kubernetes Networking Interview Questions
+
+### 1. What is Kubernetes Networking?
+
+It enables communication between Pods, Services, Nodes and external applications.
+
+### 2. What is CNI?
+
+CNI stands for Container Network Interface. It provides Pod networking.
+
+### 3. What is kube-proxy?
+
+It manages Service networking and forwards traffic to backend Pods.
+
+### 4. What is CoreDNS?
+
+CoreDNS provides DNS-based Service Discovery.
+
+### 5. What happens when a Pod IP changes?
+
+A Service provides a stable IP and DNS name, so clients do not need to depend on individual Pod IPs.
+
+### 6. What is a NetworkPolicy?
+
+It controls incoming and outgoing network traffic for selected Pods.
+
+### 7. What is Ingress?
+
+Ingress manages external HTTP and HTTPS routing to Kubernetes Services.
+
+### 8. Difference between Service and Ingress?
+
+Service provides stable access to Pods. Ingress provides HTTP/HTTPS routing using hostnames and paths.
+
+### 9. What is eBPF?
+
+eBPF is a Linux kernel technology used for networking, observability and security.
+
+### 10. What is Service Mesh?
+
+A dedicated networking layer for managing microservice communication. Examples include Istio and Linkerd.
+
+### 11. What is East-West Traffic?
+
+Communication between internal applications and services.
+
+### 12. What is North-South Traffic?
+
+Traffic entering or leaving the Kubernetes cluster.
+
+### 13. How do you debug Service connectivity?
+
+Check Pods, Services, Endpoints, DNS, NetworkPolicies and CNI health.
+
+### 14. Why does Ingress return 404?
+
+Possible reasons include hostname mismatch, incorrect paths, incorrect backend Services or missing endpoints.
+
+### 15. What happens if kube-proxy fails?
+
+Service traffic routing can be affected, while direct Pod communication may continue.
+
+---
+
+## 10. Important Commands – Quick Revision
+
+```bash
+# Pods
+kubectl get pods
+kubectl get pods -A
+kubectl get pods -o wide
+
+# Deployments
+kubectl get deploy
+kubectl describe deployment <deployment-name>
+
+# Services
+kubectl get svc
+kubectl get endpoints
+
+# Ingress
+kubectl get ingress
+
+# Network Policies
+kubectl get netpol
+kubectl describe netpol <policy-name>
+
+# DaemonSets
+kubectl get ds -A
+
+# Logs
+kubectl logs <pod-name>
+kubectl logs <pod-name> --previous
+
+# Troubleshooting
+kubectl describe pod <pod-name>
+kubectl get events
+
+# DNS testing
+kubectl exec -it <pod-name> -- nslookup <service-name>
+
+# Delete resources
+kubectl delete -f <file-name>.yml
+```
+
+---
+
+## My Learning Outcome
+
+Through these hands-on Kubernetes exercises, I learned:
+
+- How Sidecar and Init Containers work.
+- How to expose applications using Ingress.
+- How to configure host-based and path-based routing.
+- How to troubleshoot Pod failures.
+- How Kubernetes networking works.
+- How CNI plugins provide Pod connectivity.
+- How containerd and runc work with Kubernetes.
+- How Services and CoreDNS provide Service Discovery.
+- How Network Policies control Pod communication.
+
+**These are important concepts for DevOps Engineers and Cloud Engineers working with Kubernetes environments.**
+
+
