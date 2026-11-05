@@ -1,0 +1,910 @@
+# Kubernetes Pod Scheduling and Deployment Strategies
+
+## 1. Introduction to Pod Scheduling
+
+In Kubernetes, Pod Scheduling determines which worker node should run a Pod.
+
+The Kubernetes Scheduler checks the available nodes and selects a suitable node based on different conditions.
+
+Important scheduling concepts:
+
+- Node Selector
+- Node Affinity
+- Taints and Tolerations
+- Pod Affinity
+- Pod Anti-Affinity
+- Topology Spread Constraints
+
+### Scheduling Phases
+
+| Phase | Description |
+|---|---|
+| Filtering | Removes unsuitable nodes |
+| Scoring | Ranks the remaining nodes |
+| Binding | Assigns the Pod to the selected node |
+
+## 2. Node Selector
+
+NodeSelector is the simplest way to schedule Pods onto specific nodes using node labels.
+
+**Example:** Schedule two application Pods only on a node labelled `node-name=ib-node`.
+
+### Step 1: Create the Deployment
+
+File: `nodeselector.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      nodeSelector:
+        node-name: ib-node
+      containers:
+      - name: cont1
+        image: reyadocker/internetbankingrepo:latest
+```
+
+### Step 2: Apply the Manifest
+
+```bash
+kubectl apply -f nodeselector.yml
+kubectl get pods
+```
+
+Initially, Pods remain Pending if no node has the required label.
+
+### Step 3: Check the Pod
+
+```bash
+kubectl describe pod <pod-name>
+kubectl get nodes
+```
+
+### Step 4: Add a Label to the Node
+
+```bash
+kubectl label nodes <node-name> node-name=ib-node
+```
+
+Now the scheduler can place the Pods on the matching node.
+
+### Important Points
+
+- NodeSelector uses node labels.
+- It is a hard scheduling requirement.
+- If no node matches, the Pod remains Pending.
+- It is suitable for simple scheduling requirements.
+
+## 3. Node Affinity
+
+Node Affinity is an advanced version of NodeSelector.
+
+It allows us to define flexible rules for scheduling Pods based on node labels.
+
+There are two main types:
+
+### A. Preferred During Scheduling
+
+This is a soft rule.
+
+Kubernetes prefers the matching node, but if no matching node is available, it can schedule the Pod on another suitable node.
+
+File: `preferred.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      affinity:
+        nodeAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 1
+            preference:
+              matchExpressions:
+              - key: node-name
+                operator: In
+                values:
+                - mb-node
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+```
+
+Commands:
+
+```bash
+kubectl apply -f preferred.yml
+kubectl get pods -o wide
+```
+
+Even if no node has the `mb-node` label, Kubernetes can schedule the Pod on another suitable node because this is a preferred rule.
+
+The weight represents the preference strength.
+
+### B. Required During Scheduling
+
+This is a hard rule.
+
+The Pod must be scheduled on a node that satisfies the specified conditions.
+
+File: `required.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-name
+                operator: In
+                values:
+                - mb-node
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+```
+
+Commands:
+
+```bash
+kubectl create -f required.yml
+kubectl get pods -o wide
+```
+
+If no node matches `node-name=mb-node`, the Pod remains Pending.
+
+### Supported Operators
+
+- In
+- NotIn
+- Exists
+- DoesNotExist
+- Gt
+- Lt
+
+### NodeSelector vs Node Affinity
+
+| NodeSelector | Node Affinity |
+|---|---|
+| Simple | Advanced |
+| Exact label matching | Flexible expressions |
+| Hard rule only | Hard and soft rules |
+| Limited flexibility | More scheduling control |
+
+## 4. Taints and Tolerations
+
+Taints and Tolerations control which Pods can be scheduled onto particular nodes.
+
+**Simple example:**
+
+- Taint = Lock
+- Toleration = Key
+
+A taint prevents Pods without a matching toleration from being scheduled on a node.
+
+A toleration allows a Pod to tolerate a matching taint.
+
+### Step 1: Apply a Taint to a Node
+
+```bash
+kubectl get nodes
+
+kubectl taint nodes <node-name> hardware=gpu:NoSchedule
+```
+
+This marks the node for GPU-related workloads.
+
+### Three Taint Effects
+
+| Effect | Description |
+|---|---|
+| NoSchedule | New Pods without a matching toleration will not be scheduled |
+| PreferNoSchedule | Scheduler tries to avoid the node |
+| NoExecute | Existing Pods without matching tolerations are evicted |
+
+### Step 2: Create a Deployment Without Toleration
+
+File: `deploy.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/internetbankingrepo:latest
+```
+
+```bash
+kubectl create -f deploy.yml
+kubectl get pods -o wide
+```
+
+The Pod will not be scheduled on the tainted node without a matching toleration.
+
+### Step 3: Add Toleration
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ib-deployment
+  labels:
+    app: bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      containers:
+      - name: cont1
+        image: reyadocker/internetbankingrepo:latest
+      tolerations:
+      - key: "hardware"
+        operator: "Equal"
+        value: "gpu"
+        effect: "NoSchedule"
+```
+
+Apply the updated manifest:
+
+```bash
+kubectl apply -f deploy.yml
+kubectl get pods -o wide
+```
+
+**Important:** Tolerations allow Pods to schedule on matching tainted nodes. They do not guarantee that the Pod will be placed on that node.
+
+## 5. Pod Affinity
+
+Pod Affinity allows a Pod to be scheduled close to other Pods based on their labels.
+
+Example:
+
+- Backend application should run close to the database Pod.
+- Pods can be grouped based on application requirements.
+
+## 6. Pod Anti-Affinity
+
+Pod Anti-Affinity prevents selected Pods from running together in the same topology domain.
+
+Example:
+
+```text
+Frontend-1 → Node 1
+Frontend-2 → Node 2
+Frontend-3 → Node 3
+```
+
+Benefits:
+
+- High availability
+- Fault tolerance
+- Workload distribution
+
+## 7. Topology Spread Constraints
+
+Topology Spread Constraints distribute Pods evenly across different topology domains.
+
+Examples:
+
+- Nodes
+- Availability Zones
+- Regions
+
+This improves application availability.
+
+## 8. Kubernetes Scheduler
+
+The Kubernetes Scheduler is responsible for selecting suitable nodes for Pods.
+
+Important factors considered:
+
+- CPU availability
+- Memory availability
+- Node labels
+- Node affinity and anti-affinity
+- Taints and tolerations
+- Resource requests
+- Node conditions
+
+### What Happens If No Node Is Suitable?
+
+The Pod remains in the Pending state.
+
+### What Is Bin Packing?
+
+Bin Packing means placing workloads efficiently on nodes to reduce unused resources.
+
+### What Is Least Requested Priority?
+
+The scheduler can prefer nodes with more available CPU and memory resources.
+
+## 9. Cordon and Drain
+
+### Cordon
+
+Cordon marks a node as unschedulable.
+
+New Pods will not be scheduled on that node.
+
+```bash
+kubectl cordon node1
+```
+
+### Drain
+
+Drain safely evicts existing workloads from a node before maintenance.
+
+```bash
+kubectl drain node1 --ignore-daemonsets
+```
+
+Important difference:
+
+- Cordon: Stops new Pod scheduling.
+- Drain: Evicts existing eligible Pods for maintenance.
+
+## 10. Blue-Green Deployment in Kubernetes
+
+### What Is Blue-Green Deployment?
+
+Blue-Green Deployment is a deployment strategy where two versions of an application are maintained:
+
+- Blue: Existing application version.
+- Green: New application version.
+
+Both versions are deployed separately.
+
+A Kubernetes Service controls which version receives traffic.
+
+### Step 1: Deploy Blue Version
+
+File: `blue.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-blue
+  labels:
+    app: my-app
+    version: blue
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: my-app
+        version: blue
+    spec:
+      containers:
+      - name: my-app
+        image: trainerreyaz/ib-image:latest
+        ports:
+        - containerPort: 80
+```
+
+```bash
+kubectl create -f blue.yml
+```
+
+### Step 2: Create a Service
+
+File: `blue-service.yml`
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-app
+    version: blue
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: LoadBalancer
+```
+
+```bash
+kubectl create -f blue-service.yml
+kubectl get service
+```
+
+Wait for the external LoadBalancer address and access the application through a browser.
+
+### Step 3: Deploy Green Version
+
+File: `green.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app-green
+  labels:
+    app: my-app
+    version: green
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+      version: green
+  template:
+    metadata:
+      labels:
+        app: my-app
+        version: green
+    spec:
+      containers:
+      - name: my-app
+        image: trainerreyaz/mb-image:latest
+        ports:
+        - containerPort: 80
+```
+
+```bash
+kubectl create -f green.yml
+```
+
+Now both versions are running.
+
+### Step 4: Switch Traffic to Green
+
+Update the Service selector:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-app-service
+spec:
+  selector:
+    app: my-app
+    version: green
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: LoadBalancer
+```
+
+Apply the change:
+
+```bash
+kubectl apply -f blue-service.yml
+```
+
+Refresh the LoadBalancer URL.
+
+Traffic is now directed to the Green application.
+
+### Blue-Green Flow
+
+```text
+          LoadBalancer
+                |
+          Kubernetes Service
+                |
+          Version Selector
+             /       \
+          Blue       Green
+        (Old App)   (New App)
+
+     Switch selector from
+          Blue → Green
+```
+
+## 11. Canary Deployment in Kubernetes
+
+### What Is Canary Deployment?
+
+Canary Deployment introduces a new application version alongside the existing version.
+
+Initially, most replicas run the old version, while fewer replicas run the new version.
+
+Traffic can reach both versions through a common Service.
+
+### Goal
+
+- Existing application: V1
+- New application: V2
+- Deploy V2 alongside V1.
+- Gradually increase the new version.
+
+### Step 1: Create a Namespace
+
+```bash
+kubectl create namespace canary-demo
+
+kubectl config set-context --current --namespace=canary-demo
+
+kubectl get pods
+```
+
+### Step 2: Deploy NGINX V1
+
+File: `nginx-v1.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-v1
+  labels:
+    app: nginx
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: nginx
+        version: v1
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.19
+        ports:
+        - containerPort: 80
+```
+
+```bash
+kubectl apply -f nginx-v1.yml
+```
+
+### Step 3: Deploy NGINX V2
+
+File: `nginx-v2.yml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-v2
+  labels:
+    app: nginx
+    version: v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: nginx
+        version: v2
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21
+        ports:
+        - containerPort: 80
+```
+
+```bash
+kubectl apply -f nginx-v2.yml
+```
+
+### Step 4: Create a LoadBalancer Service
+
+File: `nginx-service.yml`
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "classic"
+spec:
+  type: LoadBalancer
+  selector:
+    app: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+```
+
+```bash
+kubectl apply -f nginx-service.yml
+
+kubectl get svc nginx-service
+```
+
+Access the external LoadBalancer address.
+
+The Service selects Pods with `app=nginx`, which includes both V1 and V2.
+
+### Step 5: Gradually Increase V2 Replicas
+
+```bash
+kubectl scale deployment nginx-v2 --replicas=2
+
+kubectl scale deployment nginx-v1 --replicas=1
+```
+
+Later, move completely to V2:
+
+```bash
+kubectl scale deployment nginx-v1 --replicas=0
+```
+
+Check the Pods:
+
+```bash
+kubectl get pods
+```
+
+### Canary Rollout Strategy
+
+```text
+Initial:
+V1 = 3 replicas
+V2 = 1 replica
+
+Next:
+V1 = 1 replica
+V2 = 2 replicas
+
+Final:
+V1 = 0 replicas
+V2 = 2 replicas
+```
+
+Note: This replica-based example demonstrates gradual version changes. A standard Kubernetes Service does not guarantee exact percentage-based traffic splitting.
+
+## 12. Kubernetes Labels and Annotations
+
+### Labels
+
+Labels are key-value pairs used to identify, group and select Kubernetes objects.
+
+Examples:
+
+```yaml
+labels:
+  app: nginx
+  tier: backend
+```
+
+### Annotations
+
+Annotations are key-value pairs used to attach additional metadata to Kubernetes objects.
+
+They are useful for tools, controllers and scripts.
+
+Example:
+
+```yaml
+annotations:
+  service.beta.kubernetes.io/aws-load-balancer-type: "classic"
+```
+
+### Labels vs Annotations
+
+| Feature | Labels | Annotations |
+|---|---|---|
+| Purpose | Identification and grouping | Additional metadata |
+| Used for | Selectors | Tools and controllers |
+| Example | app=nginx | LoadBalancer configuration |
+
+## 13. Important Kubernetes Commands
+
+```bash
+# View nodes
+kubectl get nodes
+
+# View Pods
+kubectl get pods
+
+# View Pods with node information
+kubectl get pods -o wide
+
+# Describe a Pod
+kubectl describe pod <pod-name>
+
+# Apply a manifest
+kubectl apply -f file.yml
+
+# Create resources
+kubectl create -f file.yml
+
+# Delete a Deployment
+kubectl delete deployment <deployment-name>
+
+# Label a node
+kubectl label nodes <node-name> node-name=ib-node
+
+# Add a taint
+kubectl taint nodes <node-name> hardware=gpu:NoSchedule
+
+# Cordon a node
+kubectl cordon <node-name>
+
+# Drain a node
+kubectl drain <node-name> --ignore-daemonsets
+
+# View Services
+kubectl get svc
+
+# Scale a Deployment
+kubectl scale deployment <deployment-name> --replicas=3
+```
+
+## 14. Important Interview Questions
+
+**1. What is Pod Scheduling?**
+
+Pod Scheduling is the process of selecting a suitable node to run a Pod.
+
+**2. What is NodeSelector?**
+
+NodeSelector schedules Pods onto nodes with matching labels.
+
+**3. What is Node Affinity?**
+
+Node Affinity provides flexible scheduling rules based on node labels.
+
+**4. What is the difference between Preferred and Required Node Affinity?**
+
+Preferred is a soft rule. Required is a hard rule.
+
+**5. What are Taints?**
+
+Taints prevent Pods without matching tolerations from being scheduled on certain nodes.
+
+**6. What are Tolerations?**
+
+Tolerations allow Pods to tolerate matching node taints.
+
+**7. Do tolerations guarantee Pod placement?**
+
+No. They only allow scheduling onto matching tainted nodes.
+
+**8. What is Pod Affinity?**
+
+It schedules Pods near other selected Pods.
+
+**9. What is Pod Anti-Affinity?**
+
+It helps prevent selected Pods from running together in the same topology domain.
+
+**10. What is Topology Spread Constraint?**
+
+It distributes Pods across nodes, zones or other topology domains.
+
+**11. What happens if no node satisfies scheduling requirements?**
+
+The Pod remains Pending.
+
+**12. What is Cordon?**
+
+It marks a node unschedulable.
+
+**13. What is Drain?**
+
+It evicts eligible Pods from a node for maintenance.
+
+**14. What is Blue-Green Deployment?**
+
+It maintains old and new application versions and switches traffic between them.
+
+**15. What is Canary Deployment?**
+
+It introduces a new application version alongside the existing version and gradually increases its usage.
+
+**16. What is the role of a Kubernetes Service in these deployment strategies?**
+
+It provides a stable endpoint and selects Pods using labels.
+
+**17. What is Bin Packing?**
+
+It places workloads efficiently to reduce unused node resources.
+
+**18. What is the difference between Labels and Annotations?**
+
+Labels identify and select objects. Annotations store additional metadata.
+
+## 15. Final Summary
+
+- NodeSelector: Simple node selection.
+- Node Affinity: Advanced node selection.
+- Preferred Affinity: Soft scheduling rule.
+- Required Affinity: Hard scheduling rule.
+- Taints: Repel Pods.
+- Tolerations: Allow Pods to tolerate taints.
+- Pod Affinity: Keep selected Pods close.
+- Pod Anti-Affinity: Spread selected Pods apart.
+- Topology Spread: Distribute workloads across topology domains.
+- Cordon: Stop new Pod scheduling.
+- Drain: Evict eligible Pods for maintenance.
+- Blue-Green: Switch between two application versions.
+- Canary: Gradually introduce a new application version.
+- Labels: Identify and select objects.
+- Annotations: Store additional metadata.
+
+---
+
+**Hands-on Kubernetes Learning**
+
+These notes cover practical Kubernetes Pod Scheduling and deployment strategies, including YAML manifests, `kubectl` commands, and Blue-Green and Canary deployment exercises.
