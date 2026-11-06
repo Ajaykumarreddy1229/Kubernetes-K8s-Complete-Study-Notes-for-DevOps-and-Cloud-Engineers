@@ -1,0 +1,1325 @@
+# Kubernetes Advanced DevOps – Helm, Argo CD & HashiCorp Vault
+
+## Project Overview
+
+In this project, I learned how to manage Kubernetes applications using Helm, automate application deployments using Argo CD, and securely manage application secrets using HashiCorp Vault.
+
+This project covers three important DevOps tools:
+
+1. **Helm** – Kubernetes package manager.
+2. **Argo CD** – GitOps-based continuous delivery tool for Kubernetes.
+3. **HashiCorp Vault** – Centralized secrets management tool.
+
+The main objective of this hands-on practice is to understand application deployment, automated synchronization, rollback, and secure secret management in Kubernetes.
+
+---
+
+# 1. HELM – Kubernetes Package Manager
+
+## What is Helm?
+
+Helm is a powerful package manager for Kubernetes. It simplifies the deployment and management of applications inside Kubernetes clusters.
+
+Helm uses **Charts** to package Kubernetes resources such as Deployments, Services, ConfigMaps, and other Kubernetes objects.
+
+We can install, upgrade, and manage applications in Kubernetes using Helm.
+
+### Package Managers
+
+| Platform | Package Manager |
+|---|---|
+| Red Hat Linux | YUM |
+| Ubuntu | APT |
+| Windows | Chocolatey |
+| Kubernetes | Helm |
+
+### Important Helm Concepts
+
+- Helm is used to install applications on Kubernetes clusters.
+- It manages Kubernetes resources through Charts.
+- A Chart is a collection of files organized in a directory structure.
+- A Chart contains Kubernetes manifest templates and configuration files.
+- A running instance of a Chart with a specific configuration is called a **Release**.
+- Helm is written in the Go programming language.
+- Helm uses Kubernetes client libraries to communicate with Kubernetes.
+
+## Helm Architecture
+
+### 1. Helm Repository
+A Helm repository stores Helm Charts that users can download and install.
+
+### 2. Helm Client
+The Helm client downloads Charts from repositories and manages installations and upgrades.
+
+### 3. Kubernetes API Server
+Helm uses the Kubernetes API Server to create and manage Kubernetes resources.
+
+**Helm Chart Repository:** https://artifacthub.io/
+
+## Install Helm
+
+Run the following commands on your Kubernetes management server:
+
+```bash
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+
+chmod 700 get_helm.sh
+
+./get_helm.sh
+```
+
+Verify Helm installation:
+
+```bash
+helm version
+```
+
+## Create a Helm Chart
+
+Create a sample Chart:
+
+```bash
+helm create sample-chart
+```
+
+Move into the Chart directory:
+
+```bash
+cd sample-chart
+```
+
+Helm creates a directory structure containing:
+
+- `Chart.yaml` – Chart information.
+- `values.yaml` – Default configuration values.
+- `templates/` – Kubernetes resource templates.
+- `charts/` – Dependencies of the Chart.
+- `templates/deployment.yaml` – Deployment template.
+- `templates/service.yaml` – Service template.
+
+**Important:** Helm templates use values from `values.yaml` to generate Kubernetes manifest files.
+
+---
+
+# 2. ARGO CD – GitOps Continuous Delivery
+
+## What is Argo CD?
+
+Argo CD is a declarative continuous delivery tool for Kubernetes.
+
+It is a core component of the Argo Project. It automates the deployment and management of applications inside Kubernetes clusters.
+
+Argo CD follows the **GitOps methodology**.
+
+We define the desired state of our Kubernetes applications in YAML manifest files and store those files in a Git repository.
+
+Argo CD continuously monitors the Git repository and synchronizes the changes with the Kubernetes cluster.
+
+### Why Argo CD?
+
+Traditional CI/CD pipelines can perform Kubernetes deployments, but Argo CD provides a GitOps-based approach to managing application deployments.
+
+### Important Features
+
+- Automated application deployment.
+- GitOps-based deployment.
+- Continuous monitoring of Git repositories.
+- Automatic synchronization.
+- Application health monitoring.
+- Configuration drift detection.
+- Rollback support.
+- Multiple environment support.
+- Simple user interface.
+
+## How Argo CD Works
+
+1. Developers update Kubernetes manifest files.
+2. Changes are pushed to GitHub.
+3. Argo CD monitors the Git repository.
+4. Argo CD detects changes.
+5. Argo CD synchronizes the desired state with the Kubernetes cluster.
+6. Kubernetes creates or updates the application resources.
+
+## Argo CD Installation Using Helm
+
+### Prerequisites
+
+- Kubernetes cluster created using KOPS.
+- kubectl installed and configured.
+- Helm installed.
+
+### Step 1: Install Helm
+
+```bash
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+
+chmod 700 get_helm.sh
+
+./get_helm.sh
+
+helm version
+```
+
+### Step 2: Add Argo CD Helm Repository
+
+```bash
+helm repo add argo https://argoproj.github.io/argo-helm
+```
+
+Update the repository:
+
+```bash
+helm repo update
+```
+
+### Step 3: Create Argo CD Namespace
+
+```bash
+kubectl create namespace argocd
+```
+
+### Step 4: Install Argo CD
+
+```bash
+helm install argocd argo/argo-cd --namespace argocd
+```
+
+Here:
+
+- `argocd` – Release name.
+- `argo` – Helm repository name.
+- `argo-cd` – Chart name.
+- `argocd` – Kubernetes namespace.
+
+### Step 5: Verify Installation
+
+```bash
+kubectl get all -n argocd
+```
+
+### Additional Helm Commands
+
+List installed releases:
+
+```bash
+helm list
+```
+
+Upgrade a release:
+
+```bash
+helm upgrade argocd argo/argo-cd -n argocd
+```
+
+Rollback a release:
+
+```bash
+helm rollback argocd -n argocd
+```
+
+Search Charts in Helm Hub:
+
+```bash
+helm search hub argo/argo-cd
+```
+
+Search Charts in the configured repository:
+
+```bash
+helm search repo argo
+```
+
+## Expose Argo CD Server
+
+Change the Argo CD Server Service type to LoadBalancer:
+
+```bash
+kubectl patch svc argocd-server -n argocd -p '{"spec": {"type": "LoadBalancer"}}'
+```
+
+Install jq:
+
+```bash
+yum install jq -y
+```
+
+Get the LoadBalancer hostname:
+
+```bash
+kubectl get svc argocd-server -n argocd -o json | jq --raw-output '.status.loadBalancer.ingress[0].hostname'
+```
+
+The above command provides the LoadBalancer hostname used to access the Argo CD web interface.
+
+## Get Argo CD Initial Admin Password
+
+Run:
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+```
+
+Open the Argo CD LoadBalancer URL in your browser.
+
+Login details:
+
+- Username: `admin`
+- Password: Use the initial password obtained from the previous command.
+
+## Create an Application in Argo CD
+
+Create an application through the Argo CD UI.
+
+Use the following configuration from the hands-on practice:
+
+| Configuration | Value |
+|---|---|
+| Application Name | bankapp |
+| Project Name | default |
+| Sync Policy | Automatic |
+| Repository | `https://github.com/ReyazShaik/ar-deploy.git` |
+| Path | `./` |
+| Cluster URL | Kubernetes cluster URL |
+| Namespace | default |
+
+After creating the application, Argo CD automatically deploys the Kubernetes resources from the Git repository.
+
+Verify Pods:
+
+```bash
+kubectl get po
+```
+
+Verify Services:
+
+```bash
+kubectl get svc
+```
+
+Copy the application LoadBalancer endpoint and open it in a browser.
+
+## Test Automatic Synchronization
+
+1. Open the GitHub deployment repository.
+2. Modify the replica count to `5` in `deploy.yml`.
+3. Commit and push the changes.
+4. Argo CD detects the Git changes.
+5. Argo CD automatically synchronizes the Kubernetes cluster.
+6. Verify the updated resources.
+
+This demonstrates GitOps-based continuous delivery.
+
+## History and Rollback
+
+Argo CD maintains application deployment history.
+
+To roll back:
+
+1. Open the application in Argo CD.
+2. Navigate to History and Rollback.
+3. Select the required previous revision.
+4. Use the rollback option.
+
+This helps restore an earlier application deployment.
+
+---
+
+# 3. HASHICORP VAULT – Secure Secrets Management
+
+## What is a Secret?
+
+A Secret is sensitive information used by applications, users, or systems that should not be exposed publicly.
+
+Examples:
+
+- Database passwords.
+- API keys.
+- Authentication tokens.
+- Certificates.
+- Encryption keys.
+
+## Why Do We Need Secrets Management?
+
+Developers sometimes store passwords directly inside:
+
+- Source code.
+- Docker images.
+- Kubernetes Secrets.
+- Configuration files.
+- GitHub repositories.
+
+Example of hardcoded credentials:
+
+```javascript
+const dbPassword = "root123";
+```
+
+This creates security risks because anyone who has access to the code may be able to view the password.
+
+## What is Secrets Management?
+
+Secrets Management is the process of:
+
+1. Securely storing secrets.
+2. Controlling access to secrets.
+3. Rotating secrets automatically.
+4. Auditing secret usage.
+5. Delivering secrets securely to applications.
+
+## Traditional Approach vs Modern Approach
+
+### Traditional Approach
+
+```text
+Application
+     |
+     v
+ config.yaml
+     |
+     v
+password=root123
+```
+
+Problems:
+
+- Passwords can be exposed.
+- Difficult to rotate passwords.
+- No centralized auditing.
+
+### Modern Approach
+
+```text
+Application
+     |
+     v
+HashiCorp Vault
+     |
+     v
+Secure Secret Access
+```
+
+Benefits:
+
+- Encrypted storage.
+- Access control.
+- Audit logs.
+- Secret rotation.
+
+## What is HashiCorp Vault?
+
+HashiCorp Vault is a centralized secrets management tool used to securely store, manage, and control access to sensitive information.
+
+Think of Vault as a highly secure digital locker for passwords, certificates, tokens, and encryption keys.
+
+### Simple Example
+
+| Real-world Example | Vault Concept |
+|---|---|
+| Bank Locker | Vault |
+| Money | Secret |
+| Customer | Application |
+| ID Card | Authentication |
+| Locker Access Rules | Policies |
+
+## Vault Architecture
+
+```text
+             Applications
+                   |
+                   v
+           +---------------+
+           |     Vault     |
+           +-------+-------+
+                   |
+          +--------+--------+
+          |                 |
+          v                 v
+   Authentication     Secret Engines
+          |                 |
+          v                 v
+       Policies       Stored Secrets
+```
+
+## Core Components of Vault
+
+### 1. Secret Engine
+
+Secret Engines are responsible for storing and managing secrets.
+
+Example:
+
+```text
+secret/mysql
+```
+
+Contains:
+
+```text
+username=root
+password=root123
+```
+
+### 2. Authentication Methods
+
+Authentication determines who is requesting access to Vault.
+
+Examples:
+
+- Kubernetes Auth.
+- AppRole.
+- LDAP.
+- OIDC.
+- AWS IAM.
+
+### 3. Policies
+
+Policies define permissions and control which secrets users or applications can access.
+
+Example:
+
+```text
+Can read:
+secret/mysql
+
+Cannot read:
+secret/aws
+```
+
+### 4. Roles
+
+Roles connect users or applications to Vault policies.
+
+Example:
+
+```text
+mysql-reader
+      |
+      v
+ mysql-policy
+```
+
+## Key Features of Vault
+
+**Centralized Secret Storage:** All secrets are managed in one centralized location.
+
+**Encryption:** Secrets are encrypted at rest and in transit.
+
+**Access Control:** Only authorized users and applications can access secrets.
+
+**Audit Logging:** Secret access activities can be audited.
+
+**Dynamic Secrets:** Vault can generate temporary credentials.
+
+Example:
+
+```text
+username=vault-user-123
+password=random-password
+TTL=1 hour
+```
+
+After the lease expires, Vault can revoke the generated credentials.
+
+**Secret Rotation:** Credentials can be changed periodically without manually updating every application.
+
+## Why Use Vault with Kubernetes?
+
+### Without Vault
+
+```text
+Kubernetes Secret
+        |
+        v
+Base64 Encoded Password
+```
+
+Kubernetes Secret values are Base64 encoded, not automatically encrypted just because they are Base64 encoded.
+
+### With Vault
+
+```text
+Application
+     |
+     v
+Vault Authentication
+     |
+     v
+Secret Retrieved Securely
+```
+
+Benefits:
+
+- No hardcoded passwords.
+- Centralized secret management.
+- Secret rotation.
+- Fine-grained access control.
+- Audit logging.
+- Kubernetes-native authentication.
+
+---
+
+# 4. HASHICORP VAULT INTEGRATION WITH KUBERNETES
+
+## Implementation Overview
+
+In this hands-on implementation, HashiCorp Vault is deployed inside a Kubernetes cluster using Helm.
+
+The Kubernetes authentication method allows applications running inside Kubernetes Pods to authenticate with Vault using their Service Accounts.
+
+Vault Agent Injector automatically adds Vault Agent containers to application Pods and injects the required secrets.
+
+## Implementation Steps
+
+| Step | Activity | Location |
+|---|---|---|
+| 1 | Install Vault | KOPS Server |
+| 2 | Initialize Vault | Vault Pod |
+| 3 | Unseal Vault | Vault Pod |
+| 4 | Store Secret | Vault Pod |
+| 5 | Enable Kubernetes Auth | Vault Pod |
+| 6 | Configure Kubernetes Auth | Vault Pod |
+| 7 | Create Policy | Vault Pod |
+| 8 | Create Role | Vault Pod |
+| 9 | Create Service Account | KOPS Server |
+| 10 | Deploy Application | KOPS Server |
+| 11 | Verify Secret Injection | KOPS Server |
+
+## Step 1: Install Vault in Kubernetes
+
+Deploy Vault into the Kubernetes cluster using Helm.
+
+Why?
+
+Instead of storing secrets directly inside Kubernetes application configurations, Vault acts as a centralized source for sensitive information.
+
+Create a namespace:
+
+```bash
+kubectl create namespace vault
+```
+
+Verify:
+
+```bash
+kubectl get ns
+```
+
+## Step 2: Install Helm
+
+Run on the KOPS Server:
+
+```bash
+curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+
+chmod 700 get_helm.sh
+
+./get_helm.sh
+
+helm version
+```
+
+## Step 3: Add HashiCorp Helm Repository
+
+```bash
+helm repo add hashicorp https://helm.releases.hashicorp.com
+```
+
+Update the repository:
+
+```bash
+helm repo update
+```
+
+## Step 4: Install Vault
+
+```bash
+helm install vault hashicorp/vault -n vault
+```
+
+Verify the Pods:
+
+```bash
+kubectl get pods -n vault
+```
+
+Expected components include:
+
+```text
+vault-0
+vault-agent-injector-...
+```
+
+## Step 5: Enter Vault Pod
+
+Run on the KOPS Server:
+
+```bash
+kubectl exec -it vault-0 -n vault -- sh
+```
+
+## Step 6: Check Vault Status
+
+Run inside the Vault Pod:
+
+```bash
+vault status
+```
+
+Expected initial status:
+
+```text
+Initialized: false
+Sealed: true
+```
+
+### What is Sealed and Unsealed?
+
+Vault starts in a sealed state.
+
+When Vault is sealed, it cannot access the encryption keys required to read stored secrets.
+
+During initialization, Vault generates key shares.
+
+In the Shamir seal configuration used in this practice, the default is five key shares, with three required to unseal Vault.
+
+## Step 7: Initialize Vault
+
+Run inside the Vault Pod:
+
+```bash
+vault operator init
+```
+
+Vault generates:
+
+- Unseal Keys.
+- Initial Root Token.
+
+**Important:** Save these credentials securely. Never upload real Unseal Keys or Root Tokens to GitHub.
+
+## Step 8: Unseal Vault
+
+Use the required number of different unseal keys:
+
+```bash
+vault operator unseal
+```
+
+Enter an unseal key when prompted.
+
+Repeat with the required key shares.
+
+Check Vault status:
+
+```bash
+vault status
+```
+
+Expected:
+
+```text
+Sealed: false
+```
+
+## Step 9: Login to Vault
+
+Run inside the Vault Pod:
+
+```bash
+vault login
+```
+
+Enter the initial Root Token securely when prompted.
+
+Why?
+
+Administrative access is required to configure authentication methods, policies, and secrets.
+
+## Step 10: Enable KV Secret Engine
+
+Enable the KV Version 2 secret engine:
+
+```bash
+vault secrets enable -path=secret kv-v2
+```
+
+Verify:
+
+```bash
+vault secrets list
+```
+
+## Step 11: Store Application Secret
+
+Store the database credentials:
+
+```bash
+vault kv put secret/mysql username=root password=<YOUR_DB_PASSWORD>
+```
+
+Retrieve the secret:
+
+```bash
+vault kv get secret/mysql
+```
+
+Why?
+
+Applications should not hardcode database credentials. Vault provides a centralized and controlled location for managing them.
+
+## Step 12: Enable Kubernetes Authentication
+
+Run inside the Vault Pod:
+
+```bash
+vault auth enable kubernetes
+```
+
+Verify:
+
+```bash
+vault auth list
+```
+
+## Step 13: Get Kubernetes API Server Details
+
+Open a second terminal on the KOPS Server.
+
+Run:
+
+```bash
+kubectl config view \
+--minify \
+-o jsonpath='{.clusters[0].cluster.server}'
+```
+
+This command returns the Kubernetes API Server URL.
+
+## Step 14: Get Kubernetes CA Certificate
+
+Run on the KOPS Server:
+
+```bash
+kubectl config view --raw \
+--minify \
+--flatten \
+-o jsonpath='{.clusters[0].cluster.certificate-authority-data}' \
+| base64 -d > ca.crt
+```
+
+## Step 15: Copy CA Certificate into Vault Pod
+
+```bash
+kubectl cp ca.crt vault/vault-0:/tmp/ca.crt
+```
+
+Verify:
+
+```bash
+kubectl exec -it vault-0 -n vault -- ls /tmp
+```
+
+## Step 16: Create Vault Authentication Service Account
+
+Run on the KOPS Server:
+
+Create a YAML file:
+
+```bash
+vi vault-auth.yaml
+```
+
+Add the following configuration:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-auth
+  namespace: vault
+```
+
+Apply the configuration:
+
+```bash
+kubectl apply -f vault-auth.yaml
+```
+
+## Step 17: Generate Service Account Token
+
+```bash
+kubectl create token vault-auth -n vault
+```
+
+Save the generated token securely for the next configuration step.
+
+## Step 18: Configure Kubernetes Authentication
+
+Enter the Vault Pod terminal.
+
+Run:
+
+```bash
+vault write auth/kubernetes/config \
+token_reviewer_jwt="<SERVICE_ACCOUNT_TOKEN>" \
+kubernetes_host="<KUBERNETES_API_SERVER_URL>" \
+kubernetes_ca_cert=@/tmp/ca.crt
+```
+
+Replace the placeholders with the actual values from your cluster.
+
+Expected output:
+
+```text
+Success! Data written
+```
+
+## Step 19: Create Vault Policy
+
+Create the policy file:
+
+```bash
+cd /tmp
+
+vi mysql-policy.hcl
+```
+
+Add:
+
+```hcl
+path "secret/data/mysql" {
+  capabilities = ["read"]
+}
+```
+
+Save the file.
+
+Write the policy to Vault:
+
+```bash
+vault policy write mysql-policy mysql-policy.hcl
+```
+
+This policy allows authorized applications to read the MySQL secret.
+
+## Step 20: Create Application Service Account
+
+Run on the KOPS Server.
+
+Create a file:
+
+```bash
+vi mysql-reader.yaml
+```
+
+Add:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mysql-reader
+  namespace: default
+```
+
+Apply:
+
+```bash
+kubectl apply -f mysql-reader.yaml
+```
+
+## Step 21: Create Vault Role
+
+Run inside the Vault Pod:
+
+```bash
+vault write auth/kubernetes/role/mysql-role \
+bound_service_account_names=mysql-reader \
+bound_service_account_namespaces=default \
+policies=mysql-policy \
+ttl=24h
+```
+
+This connects the Kubernetes Service Account with the Vault policy.
+
+The authentication relationship is:
+
+```text
+Application
+     |
+     v
+Service Account
+     |
+     v
+Vault Role
+     |
+     v
+Vault Policy
+     |
+     v
+Secret Access
+```
+
+## Step 22: Enable Vault Agent Injector
+
+Run on the KOPS Server:
+
+```bash
+helm upgrade vault hashicorp/vault \
+-n vault \
+--set injector.enabled=true
+```
+
+Verify:
+
+```bash
+kubectl get pods -n vault
+```
+
+Expected components:
+
+```text
+vault-0
+vault-agent-injector
+```
+
+The injector automatically adds Vault Agent containers to application Pods.
+
+## Step 23: Create RoleBinding
+
+Run on the KOPS Server:
+
+```bash
+kubectl create clusterrolebinding vault-auth-binding \
+--clusterrole=system:auth-delegator \
+--serviceaccount=vault:vault-auth
+```
+
+This grants the Vault authentication Service Account the permissions required for Kubernetes token review.
+
+## Step 24: Deploy Application with Vault Annotations
+
+Create the application YAML file:
+
+```bash
+vi app.yaml
+```
+
+Add:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  annotations:
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/role: "mysql-role"
+    vault.hashicorp.com/agent-inject-secret-db.txt: "secret/data/mysql"
+
+spec:
+  serviceAccountName: mysql-reader
+
+  containers:
+  - name: nginx
+    image: nginx
+```
+
+Apply the configuration:
+
+```bash
+kubectl apply -f app.yaml
+```
+
+Verify:
+
+```bash
+kubectl get pods
+```
+
+## Step 25: Verify Secret Injection
+
+Enter the Nginx Pod:
+
+```bash
+kubectl exec -it nginx -- sh
+```
+
+Move to the Vault secrets directory:
+
+```bash
+cd /vault/secrets
+```
+
+Check the injected secret:
+
+```bash
+cat db.txt
+```
+
+The database credentials should be available in the injected secret file.
+
+This demonstrates how an application can access secrets without hardcoding passwords inside the application configuration.
+
+## Step 26: Troubleshooting
+
+Describe the Pod:
+
+```bash
+kubectl describe pod nginx
+```
+
+Check containers inside the Pod:
+
+```bash
+kubectl get pod nginx -o jsonpath='{.spec.containers[*].name}'
+```
+
+Check Vault Agent Init logs:
+
+```bash
+kubectl logs nginx -c vault-agent-init
+```
+
+Check Vault Agent logs:
+
+```bash
+kubectl logs nginx -c vault-agent
+```
+
+Recreate the application Pod if necessary:
+
+```bash
+kubectl delete -f app.yaml
+
+kubectl apply -f app.yaml
+```
+
+---
+
+# 5. VAULT SECRET INJECTION WORKFLOW
+
+## How Vault Agent Injector Works
+
+When Kubernetes creates an application Pod, the Vault Admission Webhook intercepts the Pod creation request.
+
+It adds Vault Agent containers to the Pod.
+
+### Original Pod
+
+```text
+nginx
+```
+
+### Modified Pod
+
+```text
+nginx
+vault-agent-init
+vault-agent
+```
+
+### Complete Secret Injection Flow
+
+1. Developer stores the secret in Vault.
+2. Kubernetes creates the application Pod.
+3. Vault Agent Injector intercepts Pod creation.
+4. Vault Agent containers are injected.
+5. Vault Agent uses the Kubernetes Service Account token.
+6. Vault authenticates the application.
+7. Kubernetes API Server validates the Service Account token.
+8. Vault checks the associated Role and Policy.
+9. Vault retrieves the requested secret.
+10. Vault Agent writes the secret into the shared volume.
+11. The application reads the secret file.
+
+## Vault Authentication Flow Diagram
+
+```text
+Application Pod
+      |
+      | JWT Token
+      v
+Vault Agent
+      |
+      v
+Vault Kubernetes Auth
+      |
+      | Validate Token
+      v
+Kubernetes API Server
+      |
+      | Valid
+      v
+Vault Role Check
+      |
+      v
+Vault Policy Check
+      |
+      v
+Read Secret
+      |
+      v
+Inject Secret
+      |
+      v
+Application
+```
+
+## Vault Secret Storage Architecture
+
+```text
+                  Kubernetes API
+                        |
+                        v
+              Validate Service Account
+                        |
+       +----------------------------------+
+       |        Kubernetes Cluster        |
+       |                                  |
+       |        +------------------+      |
+       |        |    Nginx Pod     |      |
+       |        |                  |      |
+       |        |   Nginx          |      |
+       |        |                  |      |
+       |        |   Vault Agent    |      |
+       |        |                  |      |
+       |        | /vault/secrets/  |      |
+       |        |     db.txt       |      |
+       |        +------------------+      |
+       |                                  |
+       +----------------+-----------------+
+                        |
+                        v
+              +--------------------+
+              |  HashiCorp Vault   |
+              |                    |
+              |   secret/mysql     |
+              |                    |
+              |  Policies & Roles  |
+              +--------------------+
+```
+
+## What is JWT (JSON Web Token)?
+
+JWT stands for JSON Web Token.
+
+It is a standard format for transmitting identity information between systems.
+
+Think of JWT as a digital ID card that helps prove who you are.
+
+In this implementation, the Kubernetes Service Account token is used by Vault Agent to authenticate the application with Vault.
+
+---
+
+# 6. IMPORTANT COMMANDS – QUICK REVISION
+
+## Helm Commands
+
+| Command | Purpose |
+|---|---|
+| `helm version` | Check Helm version |
+| `helm create sample-chart` | Create a Chart |
+| `helm repo add` | Add a repository |
+| `helm repo update` | Update repositories |
+| `helm install` | Install a Chart |
+| `helm list` | List releases |
+| `helm upgrade` | Upgrade a release |
+| `helm rollback` | Roll back a release |
+| `helm search hub` | Search Charts in Artifact Hub |
+| `helm search repo` | Search configured repositories |
+
+## Argo CD / Kubernetes Commands
+
+| Command | Purpose |
+|---|---|
+| `kubectl create namespace argocd` | Create Argo CD namespace |
+| `kubectl get all -n argocd` | Check Argo CD resources |
+| `kubectl get pods` | List Pods |
+| `kubectl get svc` | List Services |
+| `kubectl get ns` | List namespaces |
+| `kubectl patch svc` | Modify Service configuration |
+
+## Vault Commands
+
+| Command | Purpose |
+|---|---|
+| `vault status` | Check Vault status |
+| `vault operator init` | Initialize Vault |
+| `vault operator unseal` | Unseal Vault |
+| `vault login` | Authenticate with Vault |
+| `vault secrets enable` | Enable a Secret Engine |
+| `vault kv put` | Store a secret |
+| `vault kv get` | Retrieve a secret |
+| `vault auth enable` | Enable authentication |
+| `vault auth list` | List authentication methods |
+| `vault policy write` | Create or update a policy |
+| `vault write` | Configure Vault settings or roles |
+
+---
+
+# 7. WHAT I LEARNED FROM THIS PROJECT
+
+Through this hands-on Kubernetes practice, I learned:
+
+- How Helm works as a Kubernetes package manager.
+- How to create and manage Helm Charts.
+- How to install applications using Helm.
+- How to install Argo CD using Helm.
+- How GitOps works in Kubernetes.
+- How Argo CD monitors GitHub repositories.
+- How automatic synchronization works.
+- How to manage application deployment history and rollback.
+- What HashiCorp Vault is and why secrets management is important.
+- How to install Vault inside a Kubernetes cluster.
+- How to initialize and unseal Vault.
+- How to store database credentials in Vault.
+- How Kubernetes authentication works with Vault.
+- How to create Vault policies and roles.
+- How Vault Agent Injector works.
+- How to inject secrets into Kubernetes Pods.
+- How to verify secret injection.
+- How to troubleshoot Vault Agent containers.
+
+## Project Conclusion
+
+This project helped me understand three important areas of Kubernetes and DevOps.
+
+**Helm** simplifies application installation and management.
+
+**Argo CD** automates Kubernetes application delivery using GitOps.
+
+**HashiCorp Vault** helps securely store and manage sensitive application information.
+
+Together, these tools help improve application deployment, configuration management, and secret management in Kubernetes environments.
+
+---
+
+## Tools and Technologies Used
+
+- Kubernetes
+- KOPS
+- Helm
+- Argo CD
+- HashiCorp Vault
+- Docker
+- YAML
+- Linux
+- AWS
+- GitHub
+- kubectl
+
+## Hands-on Project Topics
+
+1. Helm Installation and Chart Creation
+2. Argo CD Installation Using Helm
+3. GitOps Continuous Delivery
+4. Automatic Synchronization
+5. Application History and Rollback
+6. HashiCorp Vault Installation
+7. Kubernetes Authentication Integration
+8. Vault Policies and Roles
+9. Vault Agent Injector
+10. Secure Secret Injection into Kubernetes Pods
+
+**End of Project Notes**
